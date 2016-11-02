@@ -27,6 +27,33 @@ def expandstring(object):
     else:
         return object
 
+def authorize():
+    print 'New Dropbox API token is required'
+    APP_KEY = raw_input('App key: ')
+    APP_SECRET = raw_input('App secret: ')
+    flow = dropbox.client.DropboxOAuth2FlowNoRedirect(APP_KEY, APP_SECRET)
+    authorize_url = flow.start()
+    print('1. Go to: ' + authorize_url)
+    print('2. Click "Allow" (you might have to log in first)')
+    print('3. Copy the authorization code.')
+    try:
+        input = raw_input
+    except NameError:
+        pass
+    code = input("Enter the authorization code here: ").strip()
+    access_token, user_id = flow.finish(code)
+    return access_token
+
+def login(token_save_path):
+    if os.path.exists(token_save_path):
+        with open(token_save_path) as token_file:
+            access_token = token_file.read()
+    else:
+        access_token = authorize()
+        with open(token_save_path, 'w') as token_file:
+            token_file.write(access_token)
+    return dropbox.client.DropboxClient(access_token)
+
 def main():
     global uid, args
     parser = argparse.ArgumentParser(description=description)
@@ -113,15 +140,15 @@ def main():
     except IOError as e:
         print str(e)
         sys.exit(1)
-    print 'End of the road'
-    sys.exit()
-    client = login('token.dat')
+    client = login(config.token_path)
     account_info = client.account_info()
     uid = account_info['uid']
     print 'Logged in as %s, uid: %s' % (account_info['email'], account_info['uid'])
+    print 'End of the road'
+    sys.exit()
     dropbox_roots = []
     try:
-        for account, details in json.loads(open(os.path.expanduser('~/.dropbox/info.json')).read()).iteritems(): # Mac only
+        for account, details in json.loads(open(os.path.expanduser('~/.dropbox/info.json')).read()).iteritems(): # Unix only
             for key, value in details.iteritems():
                 if key == 'path':
                     dropbox_roots.append(os.path.realpath(value))

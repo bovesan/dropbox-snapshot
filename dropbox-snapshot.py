@@ -1,7 +1,8 @@
 #!/usr/bin/env python2.7
 
 
-import sys, os, dropbox, time, argparse, json, pprint
+import sys, os, dropbox, time, argparse, json
+from pprint import pprint
 from functools import partial
 
 description = """This program creates and rotates local backups of a user's Dropbox account."""
@@ -52,17 +53,66 @@ def login(token_save_path):
         access_token = authorize()
         with open(token_save_path, 'w') as token_file:
             token_file.write(access_token)
-    return dropbox.client.DropboxClient(access_token)
+    return dropbox.Dropbox(access_token)
+
+def download_folder(dbx, remote_folder, local_folder):
+    if verbose: print remote_folder
+    remote_list = list_folder(dbx, remote_folder)
+    for key in sorted(remote_list):
+        time.sleep(1)
+        remote_full = remote_folder+key
+        is_folder = type(remote_list[key]) == dropbox.files.FolderMetadata
+        if is_folder:
+            download_folder(dbx, remote_full+'/', local_folder)
+        else:
+            if verbose: print '%s' % remote_full
+
+
+def list_folder(dbx, path):
+    """List a folder.
+    Return a dict mapping unicode filenames to
+    FileMetadata|FolderMetadata entries.
+    """
+    while '//' in path:
+        path = path.replace('//', '/')
+    path = path.rstrip('/')
+    try:
+        res = dbx.files_list_folder(path)
+    except dropbox.exceptions.ApiError as err:
+        print('Folder listing failed for', path, '-- assumped empty:', err)
+        return {}
+    else:
+        rv = {}
+        for entry in res.entries:
+            rv[entry.name] = entry
+        return rv
+
+def download(dbx, folder, subfolder, name):
+    """Download a file.
+    Return the bytes of the file, or None if it doesn't exist.
+    """
+    path = '/%s/%s/%s' % (folder, subfolder.replace(os.path.sep, '/'), name)
+    while '//' in path:
+        path = path.replace('//', '/')
+    with stopwatch('download'):
+        try:
+            md, res = dbx.files_download(path)
+        except dropbox.exceptions.HttpError as err:
+            print('*** HTTP error', err)
+            return None
+    data = res.content
+    print(len(data), 'bytes; md:', md)
+    return data
 
 def main():
-    global uid, args
+    global uid, args, verbose
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)
     parser.add_argument("-f", "--folder", help="Set root folder for local backups.", default=False)
     parser.add_argument("-l", "--lockfile", help="By default, only one instance of this program should run at once. If you know what your are doing, you can set different lockfile paths for separate instances.", default=False)
     parser.add_argument("-t", "--token_path", help="Read/write to a custom token file (default: " + default_token_path + ")", default=False)
-    parser.add_argument("-n", "--do_nothing", help="Do not write anything to disk. Only show what would be done.", action="store_true")
+    #parser.add_argument("-n", "--do_nothing", help="Do not write anything to disk. Only show what would be done.", action="store_true")
     parser.add_argument("-o", "--own", help="Only download files owned by current Dropbox user.", action="store_true")
     parser.add_argument("-a", "--all", help="Download all files in shared resources. (opposite of -o)", action="store_true")
     parser.add_argument("-v", "--verbose", help="Verbose output.", action="store_true")
@@ -140,27 +190,13 @@ def main():
     except IOError as e:
         print str(e)
         sys.exit(1)
-    client = login(config.token_path)
-    account_info = client.account_info()
-    uid = account_info['uid']
-    print 'Logged in as %s, uid: %s' % (account_info['email'], account_info['uid'])
-    print 'End of the road'
-    sys.exit()
-    dropbox_roots = []
-    try:
-        for account, details in json.loads(open(os.path.expanduser('~/.dropbox/info.json')).read()).iteritems(): # Unix only
-            for key, value in details.iteritems():
-                if key == 'path':
-                    dropbox_roots.append(os.path.realpath(value))
-    except IOError:
-        pass
-    for root_path_encoded in config.folder:
-        root_path = root_path_encoded.decode(sys.stdin.encoding)
-        if os.path.exists(root_path):
-            root_path = os.path.realpath(root_path)
-            for dropbox_root in dropbox_roots:
-                root_path = root_path.replace(dropbox_root, '')
-        restore_folder(client, root_path, cutoff_datetime, verbose=True)
+    dbx = login(config.token_path)
+    #pprint.pprint(dir(dbx))
+    account_info = dbx.users_get_current_account()
+    #print repr(account_info.account_id)
+    uid = account_info.account_id
+    if verbose: print 'Logged in as %s, uid: %s' % (account_info.email, uid)
+    download_folder(dbx, '/', config.folder)
 
 
 if __name__ == '__main__':

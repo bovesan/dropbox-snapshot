@@ -2,6 +2,8 @@
 
 
 import sys, os, dropbox, time, argparse, json, datetime, subprocess, math
+import Queue
+from threading import Thread
 from pprint import pprint
 from functools import partial
 
@@ -13,6 +15,19 @@ DELAY = 0.00001
 total_count = 0
 update_count = 0
 update_bytes = 0
+queue_bytes = 0
+# Create a queue to communicate with the worker threads
+queue = Queue.Queue()
+
+class Struct:
+    def __init__(self, **entries): 
+        self.__dict__.update(entries)
+
+def avg(list_of_numbers):
+    sum = 0.0
+    for n in list_of_numbers:
+        sum += float(n)
+    return sum/float(len(list_of_numbers))
 
 def human_size(num, suffix='B'):
     for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
@@ -52,7 +67,7 @@ def human_time(seconds):
     if time_string != '':
         time_string += 'and '
 
-    time_string += '%s seconds' % seconds_left
+    time_string += '%4.2f seconds' % seconds_left
     return time_string
 
 def check_pid(pid):        
@@ -63,9 +78,7 @@ def check_pid(pid):
         return False
     else:
         return True
-class Struct:
-    def __init__(self, **entries): 
-        self.__dict__.update(entries)
+
 
 def expandstring(object):
     if type(object) is str:
@@ -117,7 +130,7 @@ def login(token_save_path):
     return dropbox.Dropbox(access_token)
 
 def download_folder(dbx, remote_folder, local_folder):
-    global update_count, total_count, update_bytes
+    global update_count, total_count, update_bytes, queue_bytes
     if verbose: print u'[R] '+remote_folder,
     total_count += 1
     local_folder_path = os.path.join(local_folder, remote_folder.strip(u'/'))+u'/'
@@ -152,12 +165,8 @@ def download_folder(dbx, remote_folder, local_folder):
                     modified = True
             if modified:
                 if verbose: print u'-> [L] ' + local_file_path
-                try:
-                    api_call(dbx.files_download_to_file, local_file_path, remote_path)
-                    update_count += 1
-                    update_bytes += remote_list[key].size
-                except dropbox.exceptions.ApiError, IOError as e:
-                    print str(e)
+                queue_bytes += remote_list[key].size
+                queue.put((dbx, local_file_path, remote_path, remote_list[key]))
             else:
                 if verbose: print ''
 
@@ -182,21 +191,30 @@ def list_folder(dbx, path):
             rv[entry.name] = entry
         return rv
 
-def download(dbx, remote_path, local_path):
-    """Download a file.
-    Return the bytes of the file, or None if it doesn't exist.
-    """
-    try:
-        md, res = dbx.files_download(path)
-    except dropbox.exceptions.HttpError as err:
-        print('*** HTTP error', err)
-        return None
-    data = res.content
-    print(len(data), 'bytes; md:', md)
-    return data
+class DownloadWorker(Thread):
+   def __init__(self, queue):
+       Thread.__init__(self)
+       self.queue = queue
+
+   def run(self):
+        global update_count, total_count, update_bytes, queue_desc, queue_bytes
+        while True:
+            # Get the work from the queue and expand the tuple
+            self.dbx, self.local_file_path, self.remote_path, self.remote_item = self.queue.get()
+            try:
+                api_call(self.dbx.files_download_to_file, self.local_file_path, self.remote_path)
+                update_count += 1
+                update_bytes += self.remote_item.size
+            except:
+                queue_bytes -= self.remote_item.size
+                self.queue.task_done()
+                raise
+            queue_bytes -= self.remote_item.size
+            self.queue.task_done()
+    
 
 def main():
-    global uid, args, verbose
+    global uid, args, verbose, queue, queue_bytes
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)
@@ -314,22 +332,47 @@ def main():
                 print ' '.join(cmd)
                 subprocess.call(cmd)
 
-    if verbose: print u'Previous snapshot: ' + snapshot_previous
     checkpoint1 = time.time()
     if snapshot_previous:
+        if verbose: print u'Previous snapshot: ' + snapshot_previous
         cmd = ['cp', '-al', snapshot_previous, snapshot_now]
         if verbose:
             print u'Creating a new snapshot at ' + snapshot_now
             print ' '.join(cmd)
         subprocess.call(cmd)
     checkpoint2 = time.time()
+    # Create 8 worker threads
+    for x in range(8):
+       worker = DownloadWorker(queue)
+       # Setting daemon to True will let the main thread exit even though the workers are blocking
+       worker.daemon = True
+       worker.start()
     for remote_folder in config.remote_folders:
         download_folder(dbx, remote_folder.encode('utf8'), snapshot_now)
     checkpoint3 = time.time()
+    parsing = False
     print ''
+    wait_time = 0
+    queue_bytes_previous = queue_bytes + 0
+    wait_string_len = 0
+    speed = []
+    while not queue.empty():
+        speed = speed[-9:]+[queue_bytes_previous-queue_bytes]
+        wait_string = '  Waiting for %i downloads (%s) to complete. Current speed: %sps' % (queue.qsize(), human_size(queue_bytes), human_size(avg(speed)))
+        wait_string.ljust(wait_string_len)
+        sys.stdout.write(wait_string+'\r')
+        wait_string_len = len(wait_string)
+        queue_bytes_previous = queue_bytes + 0
+        sys.stdout.flush()
+        time.sleep(1)
+        wait_time += 1
+    queue.join()
+    checkpoint4 = time.time()
+    print ' ' * 100
     print 'Copying previous snapshot: %s' % human_time(checkpoint2 - checkpoint1)
-    print 'Dropbox comminucation: %s' % human_time(checkpoint3 - checkpoint2)
-    print 'Files/folders updated: %s' % update_count
+    print 'Dropbox getting file list: %s' % human_time(checkpoint3 - checkpoint2)
+    print 'Dropbox total time: %s' % human_time(checkpoint4 - checkpoint2)
+    print 'Files/folders updated: %i/%i' % (update_count, total_count)
     print 'Downloaded: %s' % human_size(update_bytes)
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python2.7
 
 
-import sys, os, dropbox, time, argparse, json, datetime, subprocess, math
+import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit
 import Queue
 from threading import Thread
 from pprint import pprint
@@ -19,9 +19,16 @@ queue_bytes = 0
 # Create a queue to communicate with the worker threads
 queue = Queue.Queue()
 
+
 class Struct:
     def __init__(self, **entries): 
         self.__dict__.update(entries)
+
+def abort():
+    print 'Emptying queue ...'
+    while not queue.empty():
+        queue.get()
+    sys.exit(1)
 
 def avg(list_of_numbers):
     sum = 0.0
@@ -234,7 +241,7 @@ def main():
     args.lockfile = expandstring(args.lockfile)
     args.token_path = expandstring(args.token_path)
     for i in xrange(len(args.remote_folder)):
-        args.remote_folder[i] = '/'+args.remote_folder[i].strip('/')+'/'
+        args.remote_folder[i] = ('/'+args.remote_folder[i].strip('/')+'/').replace('//', '/')
     config_dir = os.path.dirname(args.config)
     if not os.path.isdir(config_dir):
         if verbose: print 'Creating config directory: ' % config_dir
@@ -347,6 +354,7 @@ def main():
        # Setting daemon to True will let the main thread exit even though the workers are blocking
        worker.daemon = True
        worker.start()
+    atexit.register(abort)
     for remote_folder in config.remote_folders:
         download_folder(dbx, remote_folder.encode('utf8'), snapshot_now)
     checkpoint3 = time.time()

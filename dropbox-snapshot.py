@@ -51,23 +51,23 @@ def main():
         if verbose: print 'Creating config directory: ' % config_dir
         os.makedirs(config_dir)
     try:
-        config_f = open(args.config, 'w+')
+        if not os.path.isfile(args.config):
+            open(args.config, 'w').write()
+        config_raw = open(args.config).read()
     except IOError as e:
         print 'Cannot open config files for read/write: ' + args.config
         print str(e)
         sys.exit(1)
     try:
-        config_dict = json.load(config_f.read())
-    except AttributeError:
+        config_dict = json.loads(config_raw)
+    except ValueError:
         config_dict = {}
-    config_dict_old = config_dict
+    config_dict_old = config_dict.copy()
     if args.folder:
         config_dict['folder'] = args.folder
-    elif not 'folder' in config_dict.keys():
-        print 'Error: No root folder for local backups. Use the -f option to set.'
-        sys.exit(1)
+    #pprint.pprint(config_dict)
     if args.lockfile:
-        config_dict['lockfile'] = args.folder
+        config_dict['lockfile'] = args.lockfile
     elif not 'lockfile' in config_dict.keys():
         config_dict['lockfile'] = expandstring(default_lockfile_path)
     if args.token_path:
@@ -78,6 +78,8 @@ def main():
         config_dict['own'] = True
     elif args.all:
         config_dict['own'] = False
+    elif not 'own' in config_dict.keys():
+        config_dict['own'] = False
     if verbose: 
         width_key = 0
         width_value = 0
@@ -86,15 +88,21 @@ def main():
             width_value = max(width_value, len(str(value)))
         for key, value in config_dict.iteritems():
             change = ''
-            if config_dict_old[key] != value:
-                change = 'Changed from: %s' % config_dict_old[key]
+            try:
+                if config_dict_old[key] != value:
+                    change = 'Changed from: %s' % config_dict_old[key]
+            except KeyError:
+                    change = 'Changed from: None'
             print '%s: %s %s' % (key.ljust(width_key), str(value).ljust(width_value), change)
-    config = Struct(**config_dict)
     try:
-        config_f.write(json.dumps(config_dict))
+        open(args.config, 'w').write(json.dumps(config_dict))
     except IOError:
         print 'Could not update config file: ' + args.config
-    config_f.close()
+        raise
+    config = Struct(**config_dict)
+    if not 'folder' in config_dict.keys():
+        print 'Error: No root folder for local backups. Use the -f option to set.'
+        sys.exit(1)
     if os.path.isfile(config.lockfile):
         other_pid = open(config.lockfile).read()
         if check_pid(int(other_pid)):
@@ -105,7 +113,7 @@ def main():
     except IOError as e:
         print str(e)
         sys.exit(1)
-
+    print 'End of the road'
     sys.exit()
     client = login('token.dat')
     account_info = client.account_info()

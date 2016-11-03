@@ -12,6 +12,8 @@ default_config_path = '~/.dropbox-snapshot/config.json'
 default_token_path = '~/.dropbox-snapshot/token.dat'
 default_lockfile_path = '~/.dropbox-snapshot/lockfile'
 DELAY = 0.00001
+API_RETRY_DELAY = 5
+API_RETRY_MAX = 5
 total_count = 0
 update_count = 0
 update_bytes = 0
@@ -25,7 +27,7 @@ class Struct:
         self.__dict__.update(entries)
 
 def abort():
-    print 'Emptying queue ...'
+    print 'Abort: Flushing queue ...'
     while not queue.empty():
         queue.get()
     sys.exit(1)
@@ -94,19 +96,40 @@ def expandstring(object):
         return object
 
 def api_call(fun, *args, **kwargs):
-    global DELAY
+    global DELAY, API_RETRY_DELAY, API_RETRY_MAX
+    attempt = 0
     time.sleep(DELAY)
     done = False
-    while not done:
+    while not done and attempt < API_RETRY_MAX:
         try:
             response = fun(*args, **kwargs)
             done = True
-        except dropbox.rest.ErrorResponse as e:
-            if str(e).startswith('[503]'):
-                time.sleep(float(str(e).strip().split()[-1]))
-                DELAY *= 1.1
-            else:
-                raise
+        except dropbox.exceptions.InternalServerError as e:
+            request_id, status_code, body = e
+            attempt += 1
+            if attempt >= API_RETRY_MAX:
+                print 'There is an issue with the Dropbox server. Aborted after %i attempts.' % attempt
+                print str(e)
+                sys.exit(2)
+            time.sleep(API_RETRY_DELAY)
+        except requests.exceptions.ReadTimeout as e:
+            attempt += 1
+            if attempt >= API_RETRY_MAX:
+                print 'Could no receive data from server. Aborted after %i attempts.' % attempt
+                print str(e)
+                sys.exit(2)
+            time.sleep(API_RETRY_DELAY)
+        except dropbox.exceptions.RateLimitError as e:
+            request_id, error, backoff = e
+            time.sleep(backoff)
+            DELAY *= 1.1
+            attempt += 1
+            if attempt >= API_RETRY_MAX:
+                print 'Rate limit error. Aborted after %i attempts.' % attempt
+                print str(e)
+                sys.exit(2)
+        except:
+            raise
     return response
 
 def authorize():
@@ -328,6 +351,8 @@ def main():
     snapshot_previous = False
     snapshot_count = 0
     for snapshot in sorted(os.listdir(config.folder), reverse=True):
+        if snapshot.endswith('incomplete'):
+            continue
         snapshot_count += 1
         snapshot = os.path.join(config.folder, snapshot)
         if os.path.isdir(snapshot):
@@ -340,9 +365,10 @@ def main():
                 subprocess.call(cmd)
 
     checkpoint1 = time.time()
+    snapshot_incomplete = snapshot_now+' incomplete'
     if snapshot_previous:
         if verbose: print u'Previous snapshot: ' + snapshot_previous
-        cmd = ['cp', '-al', snapshot_previous, snapshot_now]
+        cmd = ['cp', '-al', snapshot_previous, snapshot_incomplete]
         if verbose:
             print u'Creating a new snapshot at ' + snapshot_now
             print ' '.join(cmd)
@@ -356,7 +382,7 @@ def main():
        worker.start()
     atexit.register(abort)
     for remote_folder in config.remote_folders:
-        download_folder(dbx, remote_folder.encode('utf8'), snapshot_now)
+        download_folder(dbx, remote_folder.encode('utf8'), snapshot_incomplete)
     checkpoint3 = time.time()
     parsing = False
     print ''
@@ -377,6 +403,8 @@ def main():
     queue.join()
     checkpoint4 = time.time()
     print ' ' * 100
+    print '%s -> %s' % (snapshot_incomplete, snapshot_now)
+    os.rename(snapshot_incomplete, snapshot_now)
     print 'Copying previous snapshot: %s' % human_time(checkpoint2 - checkpoint1)
     print 'Dropbox getting file list: %s' % human_time(checkpoint3 - checkpoint2)
     print 'Dropbox total time: %s' % human_time(checkpoint4 - checkpoint2)

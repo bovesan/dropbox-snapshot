@@ -1,5 +1,6 @@
 # dropbox-snapshot
 
+```
 usage: dropbox-snapshot.py [-h] [-c CONFIG] [-f FOLDER] [-r ROTATIONS]
                            [-l LOCKFILE] [-t TOKEN_PATH] [-o] [-a] [-v]
                            [remote_folder [remote_folder ...]]
@@ -31,3 +32,4 @@ optional arguments:
   -a, --all             Download all files in shared resources. (opposite of
                         -o)
   -v, --verbose         Verbose output.
+```

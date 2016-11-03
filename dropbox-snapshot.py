@@ -1,7 +1,7 @@
 #!/usr/bin/env python2.7
 
 
-import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit
+import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit, requests
 import Queue
 from threading import Thread
 from pprint import pprint
@@ -27,7 +27,7 @@ class Struct:
         self.__dict__.update(entries)
 
 def abort():
-    print 'Abort: Flushing queue ...'
+    print '\nAbort: Flushing queue ...'
     while not queue.empty():
         queue.get()
     print 'Exited after %s' % human_time(time.time() - checkpoint1)

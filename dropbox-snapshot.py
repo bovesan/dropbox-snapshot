@@ -30,6 +30,10 @@ def abort():
     print 'Abort: Flushing queue ...'
     while not queue.empty():
         queue.get()
+    print 'Exited after %s' % human_time(time.time() - checkpoint1)
+    print 'Files/folders scanned: %i' % total_count
+    print 'Files/folders updated: %i' % update_count
+    print 'Downloaded: %s' % human_size(update_bytes)
     sys.exit(1)
 
 def avg(list_of_numbers):
@@ -244,7 +248,7 @@ class DownloadWorker(Thread):
     
 
 def main():
-    global uid, args, verbose, queue, queue_bytes
+    global uid, args, verbose, queue, queue_bytes, checkpoint1
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)

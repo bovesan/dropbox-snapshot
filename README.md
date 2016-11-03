@@ -1,11 +1,18 @@
 # dropbox-snapshot
 
+Downloads and creates local snapshots of a user's Dropbox account.
+
+API App key/secret must be entered the first time you run the app.
+These can be created at the Dropbox Developer site: https://www.dropbox.com/developers/apps
+
 ```
 usage: dropbox-snapshot.py [-h] [-c CONFIG] [-f FOLDER] [-r ROTATIONS]
                            [-l LOCKFILE] [-t TOKEN_PATH] [-o] [-a] [-v]
                            [remote_folder [remote_folder ...]]
 
 This program creates and rotates local backups of a user's Dropbox account.
+Inspired by rsnapshot, but all configuration can be done through the CLI. API
+app key/secret are created here: https://www.dropbox.com/developers/apps
 
 positional arguments:
   remote_folder         Specify one or more remote folders to download.

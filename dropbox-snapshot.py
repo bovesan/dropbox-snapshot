@@ -2,8 +2,6 @@
 
 
 import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit, requests, logging
-import Queue
-from threading import Thread
 from pprint import pprint
 from functools import partial
 
@@ -23,9 +21,8 @@ update_count = 0
 update_bytes = 0
 queue_bytes = 0
 # Create a queue to communicate with the worker threads
-queue = Queue.Queue()
-transfers = []
 checkpoint3 = False
+download_queue = {}
 
 #logging.basicConfig(format='%(message)s')
 
@@ -35,11 +32,6 @@ class Struct:
         self.__dict__.update(entries)
 
 def abort():
-    logging.warning('Abort: Flushing queue ...')
-    for t in transfers:
-        logging.warning( u'Active transfers: ' + t )
-    while not queue.empty():
-        queue.get()
     logging.warning( 'Exited after %s' % human_time(time.time() - checkpoint1) )
     logging.warning( 'Files/folders scanned: %i' % total_count )
     logging.warning( 'Files/folders updated: %i' % update_count )
@@ -182,7 +174,7 @@ def login(token_save_path):
     return dropbox.Dropbox(access_token)
 
 def download_folder(dbx, remote_folder, local_folder):
-    global update_count, total_count, update_bytes, queue_bytes, transfers
+    global update_count, total_count, update_bytes, queue_bytes, transfers, download_queue
     logging.debug(    u'[R] '+remote_folder)
     total_count += 1
     local_folder_path = os.path.join(local_folder, remote_folder.strip(u'/'))+u'/'
@@ -216,7 +208,8 @@ def download_folder(dbx, remote_folder, local_folder):
             if modified:
                 logging.info( u'[L] Added to download queue: ' + local_file_path )
                 queue_bytes += remote_list[key].size
-                queue.put((dbx, local_file_path, remote_path, remote_list[key]))
+                download_queue[remote_path] = remote_list[key]
+                download_file(dbx, local_file_path, remote_path, remote_list[key])
 
 
 def list_folder(dbx, path):
@@ -242,31 +235,19 @@ def list_folder(dbx, path):
 def clear_line():
     sys.stdout.write("\033[K")
 
-class DownloadWorker(Thread):
-   def __init__(self, queue):
-       Thread.__init__(self)
-       self.queue = queue
-
-   def run(self):
-        global update_count, total_count, update_bytes, transfers, queue_bytes
-        while True:
-            # Get the work from the queue and expand the tuple
-            self.dbx, self.local_file_path, self.remote_path, self.remote_item = self.queue.get()
-            clear_line()
-            print(u'Downloading ' + self.remote_path)
-            transfers.append(self.local_file_path)
-            try:
-                api_call(self.dbx.files_download_to_file, self.local_file_path, self.remote_path)
-                update_count += 1
-                update_bytes += self.remote_item.size
-                queue_bytes -= self.remote_item.size
-                self.queue.task_done()
-                transfers.remove(self.local_file_path)
-            except:
-                queue_bytes -= self.remote_item.size
-                transfers.remove(self.local_file_path)
-                self.queue.task_done()
-                raise
+def download_file(dbx, local_file_path, remote_path, remote_item):
+    global update_count, total_count, update_bytes, transfers, queue_bytes
+    #clear_line()
+    print(u'Downloading ' + remote_path)
+    transfers.append(local_file_path)
+    try:
+        api_call(dbx.files_download_to_file, local_file_path, remote_path)
+        update_count += 1
+        update_bytes += remote_item.size
+        queue_bytes -= remote_item.size
+    except:
+        queue_bytes -= remote_item.size
+        raise
     
 
 def main():
@@ -406,50 +387,22 @@ def main():
         os.rename(snapshot_temp, snapshot_incomplete)
     checkpoint2 = time.time()
     print 'Getting Dropbox remote file list ...'
-    # Create 8 worker threads
-    for x in range(8):
-       worker = DownloadWorker(queue)
-       # Setting daemon to True will let the main thread exit even though the workers are blocking
-       worker.daemon = True
-       worker.start()
     atexit.register(abort)
     for remote_folder in config.remote_folders:
         download_folder(dbx, remote_folder.encode('utf8'), snapshot_incomplete)
+    logging.info('Sorting download queue by file size (small first)')
     checkpoint3 = time.time()
-    parsing = False
-    wait_time = 0
-    disk_free_previous = disk_free(snapshot_incomplete)
-    wait_string_len = 0
-    speed = []
-    while not queue.empty() or len(transfers) > 0:
-        disk_free_now = disk_free(snapshot_incomplete)
-        speed = speed[-9:]+[disk_free_previous-disk_free_now]
-        transfer_sizes = 0
-        for t in transfers:
-            try:
-                transfer_sizes += os.path.getsize(t)
-            except OSError:
-                pass
-        wait_string = '  %i files currently downloading. %i files in queue. %s remaining. Current speed: %sps' % (len(transfers), queue.qsize(), human_size(queue_bytes - transfer_sizes), human_size(avg(speed)))
-        wait_string.ljust(wait_string_len)
-        sys.stdout.write(wait_string+'\r')
-        wait_string_len = len(wait_string)
-        disk_free_previous = disk_free_now + 0
-        sys.stdout.flush()
-        time.sleep(1)
-        wait_time += 1
-    queue.join()
+    for d in download_queue:
+        download_file(dbx, os.path.join(snapshot_incomplete, d), d, download_queue[d])
     checkpoint4 = time.time()
     print '%s -> %s' % (snapshot_incomplete, snapshot_now)
     os.rename(snapshot_incomplete, snapshot_now)
     print 'Copying previous snapshot: %s' % human_time(checkpoint2 - checkpoint1)
     print 'Dropbox getting file list: %s' % human_time(checkpoint3 - checkpoint2)
-    print 'Dropbox total time: %s' % human_time(checkpoint4 - checkpoint2)
+    print 'Dropbox downloading files: %s' % human_time(checkpoint4 - checkpoint3)
     print 'Files/folders updated: %i/%i' % (update_count, total_count)
     print 'Downloaded: %s' % human_size(update_bytes)
     atexit._exithandlers = []
-    while not queue.empty():
-        queue.get()
 
 if __name__ == '__main__':
     main()

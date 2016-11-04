@@ -1,16 +1,20 @@
 #!/usr/bin/env python2.7
 
 
-import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit, requests
+import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit, requests, logging
 import Queue
 from threading import Thread
 from pprint import pprint
 from functools import partial
 
-description = """This program creates and rotates local backups of a user's Dropbox account."""
+description = """This program creates and rotates local backups of a user's Dropbox account.
+Inspired by rsnapshot, but all configuration can be done through the CLI.
+
+API app key/secret are created here: https://www.dropbox.com/developers/apps"""
 default_config_path = '~/.dropbox-snapshot/config.json'
 default_token_path = '~/.dropbox-snapshot/token.dat'
 default_lockfile_path = '~/.dropbox-snapshot/lockfile'
+log_path = '~/.dropbox-snapshot/dsnapshot.log'
 DELAY = 0.00001
 API_RETRY_DELAY = 5
 API_RETRY_MAX = 5
@@ -20,6 +24,10 @@ update_bytes = 0
 queue_bytes = 0
 # Create a queue to communicate with the worker threads
 queue = Queue.Queue()
+transfers = []
+checkpoint3 = False
+
+#logging.basicConfig(format='%(message)s')
 
 
 class Struct:
@@ -27,14 +35,19 @@ class Struct:
         self.__dict__.update(entries)
 
 def abort():
-    print '\nAbort: Flushing queue ...'
+    logging.warning('Abort: Flushing queue ...')
+    for t in transfers:
+        logging.warning( u'Active transfers: ' + t )
     while not queue.empty():
         queue.get()
-    print 'Exited after %s' % human_time(time.time() - checkpoint1)
-    print 'Files/folders scanned: %i' % total_count
-    print 'Files/folders updated: %i' % update_count
-    print 'Downloaded: %s' % human_size(update_bytes)
-    sys.exit(1)
+    logging.warning( 'Exited after %s' % human_time(time.time() - checkpoint1) )
+    logging.warning( 'Files/folders scanned: %i' % total_count )
+    logging.warning( 'Files/folders updated: %i' % update_count )
+    logging.warning( 'Downloaded: %s' % human_size(update_bytes) )
+    #sys.exit(1)
+
+def disk_free(path):
+    return int(subprocess.Popen(['df', '-B', '1', path], stdout=subprocess.PIPE).communicate()[0].splitlines()[1].split()[3])
 
 def avg(list_of_numbers):
     sum = 0.0
@@ -105,39 +118,44 @@ def api_call(fun, *args, **kwargs):
     time.sleep(DELAY)
     done = False
     while not done and attempt < API_RETRY_MAX:
+        attempt += 1
         try:
             response = fun(*args, **kwargs)
             done = True
         except dropbox.exceptions.InternalServerError as e:
             request_id, status_code, body = e
-            attempt += 1
             if attempt >= API_RETRY_MAX:
-                print 'There is an issue with the Dropbox server. Aborted after %i attempts.' % attempt
-                print str(e)
-                sys.exit(2)
+                logging.error(  'There is an issue with the Dropbox server. Aborted after %i attempts.' % attempt )
+                logging.error( str(e) )
+                raise
             time.sleep(API_RETRY_DELAY)
         except requests.exceptions.ReadTimeout as e:
-            attempt += 1
             if attempt >= API_RETRY_MAX:
-                print 'Could no receive data from server. Aborted after %i attempts.' % attempt
-                print str(e)
-                sys.exit(2)
+                logging.error(   'Could no receive data from server. Aborted after %i attempts.' % attempt )
+                logging.error( str(e) )
+                raise
             time.sleep(API_RETRY_DELAY)
         except dropbox.exceptions.RateLimitError as e:
             request_id, error, backoff = e
             time.sleep(backoff)
             DELAY *= 1.1
-            attempt += 1
             if attempt >= API_RETRY_MAX:
-                print 'Rate limit error. Aborted after %i attempts.' % attempt
-                print str(e)
-                sys.exit(2)
+                logging.error(   'Rate limit error. Aborted after %i attempts.' % attempt )
+                logging.error( str(e) )
+                raise
+        except dropbox.exceptions.ApiError as e:
+            if attempt >= API_RETRY_MAX:
+                logging.error(   'API Error. Aborted after %i attempts.' % attempt )
+                logging.error( str(e) )
+                raise
+            time.sleep(API_RETRY_DELAY)
+
         except:
             raise
     return response
 
 def authorize():
-    print 'New Dropbox API token is required'
+    logging.warning(    'New Dropbox API token is required' )
     APP_KEY = raw_input('App key: ')
     APP_SECRET = raw_input('App secret: ')
     flow = dropbox.client.DropboxOAuth2FlowNoRedirect(APP_KEY, APP_SECRET)
@@ -164,20 +182,18 @@ def login(token_save_path):
     return dropbox.Dropbox(access_token)
 
 def download_folder(dbx, remote_folder, local_folder):
-    global update_count, total_count, update_bytes, queue_bytes
-    if verbose: print u'[R] '+remote_folder,
+    global update_count, total_count, update_bytes, queue_bytes, transfers
+    logging.debug(    u'[R] '+remote_folder)
     total_count += 1
     local_folder_path = os.path.join(local_folder, remote_folder.strip(u'/'))+u'/'
     if not os.path.isdir(local_folder_path):
-        if verbose: print u'-> [L] ' + local_folder_path
+        logging.info(   u'[L] Creating dir: ' + local_folder_path )
         try:
             os.makedirs(local_folder_path)
             update_count += 1
         except OSError as e:
-            print str(e)
+            logging.error(    str(e) )
             return False
-    else:
-        if verbose: print ''
     remote_list = list_folder(dbx, remote_folder)
     for key in sorted(remote_list):
         remote_path = remote_folder+key
@@ -185,7 +201,7 @@ def download_folder(dbx, remote_folder, local_folder):
         if is_folder:
             download_folder(dbx, remote_path+'/', local_folder)
         else:
-            if verbose: print u'[R] ' + remote_path,
+            logging.debug( u'[R] ' + remote_path )
             total_count += 1
             local_file_path = local_folder_path+key
             modified = False
@@ -198,11 +214,9 @@ def download_folder(dbx, remote_folder, local_folder):
                 if mtime_dt != remote_list[key].client_modified and size != remote_list[key].size:
                     modified = True
             if modified:
-                if verbose: print u'-> [L] ' + local_file_path
+                logging.info( u'[L] Added to download queue: ' + local_file_path )
                 queue_bytes += remote_list[key].size
                 queue.put((dbx, local_file_path, remote_path, remote_list[key]))
-            else:
-                if verbose: print ''
 
 
 def list_folder(dbx, path):
@@ -217,7 +231,7 @@ def list_folder(dbx, path):
         res = api_call(dbx.files_list_folder, path)
     except dropbox.exceptions.ApiError as err:
         raise
-        print('Folder listing failed for', path, '-- assumped empty:', err)
+        logging.warning('Folder listing failed for', path, '-- assumped empty:', err)
         return {}
     else:
         rv = {}
@@ -225,30 +239,38 @@ def list_folder(dbx, path):
             rv[entry.name] = entry
         return rv
 
+def clear_line():
+    sys.stdout.write("\033[K")
+
 class DownloadWorker(Thread):
    def __init__(self, queue):
        Thread.__init__(self)
        self.queue = queue
 
    def run(self):
-        global update_count, total_count, update_bytes, queue_desc, queue_bytes
+        global update_count, total_count, update_bytes, transfers, queue_bytes
         while True:
             # Get the work from the queue and expand the tuple
             self.dbx, self.local_file_path, self.remote_path, self.remote_item = self.queue.get()
+            clear_line()
+            print(u'Downloading ' + self.remote_path)
+            transfers.append(self.local_file_path)
             try:
                 api_call(self.dbx.files_download_to_file, self.local_file_path, self.remote_path)
                 update_count += 1
                 update_bytes += self.remote_item.size
-            except:
                 queue_bytes -= self.remote_item.size
                 self.queue.task_done()
+                transfers.remove(self.local_file_path)
+            except:
+                queue_bytes -= self.remote_item.size
+                transfers.remove(self.local_file_path)
+                self.queue.task_done()
                 raise
-            queue_bytes -= self.remote_item.size
-            self.queue.task_done()
     
 
 def main():
-    global uid, args, verbose, queue, queue_bytes, checkpoint1
+    global uid, args, queue, queue_bytes, checkpoint1
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)
@@ -261,25 +283,30 @@ def main():
     parser.add_argument("-o", "--own", help="Only download files owned by current Dropbox user.", action="store_true")
     parser.add_argument("-a", "--all", help="Download all files in shared resources. (opposite of -o)", action="store_true")
     parser.add_argument("-v", "--verbose", help="Verbose output.", action="store_true")
+    parser.add_argument("-d", "--debug", help="Extra verbose output.", action="store_true")
     args = parser.parse_args()
-    verbose = args.verbose
+    config_dir = os.path.dirname(args.config)
+    if not os.path.isdir(config_dir):
+        #logging.info( 'Creating config directory: ' % config_dir )
+        os.makedirs(config_dir)
+    logging.getLogger().addHandler(logging.StreamHandler())
+    if args.verbose:
+        logging.basicConfig(filename=expandstring(log_path), level=logging.INFO)
+    if args.debug:
+        logging.basicConfig(filename=expandstring(log_path), level=logging.DEBUG)
     args.config = expandstring(args.config)
     args.folder = expandstring(args.folder)
     args.lockfile = expandstring(args.lockfile)
     args.token_path = expandstring(args.token_path)
     for i in xrange(len(args.remote_folder)):
         args.remote_folder[i] = ('/'+args.remote_folder[i].strip('/')+'/').replace('//', '/')
-    config_dir = os.path.dirname(args.config)
-    if not os.path.isdir(config_dir):
-        if verbose: print 'Creating config directory: ' % config_dir
-        os.makedirs(config_dir)
     try:
         if not os.path.isfile(args.config):
             open(args.config, 'w').write()
         config_raw = open(args.config).read()
     except IOError as e:
-        print 'Cannot open config files for read/write: ' + args.config
-        print str(e)
+        logging.error( 'Cannot open config files for read/write: ' + args.config)
+        logging.info( str(e) )
         sys.exit(1)
     try:
         config_dict = json.loads(config_raw)
@@ -311,51 +338,51 @@ def main():
         config_dict['own'] = False
     elif not 'own' in config_dict.keys():
         config_dict['own'] = False
-    if verbose: 
-        width_key = 0
-        width_value = 0
-        for key, value in config_dict.iteritems():
-            width_key = max(width_key, len(key))
-            width_value = max(width_value, len(str(value)))
-        for key, value in config_dict.iteritems():
-            change = ''
-            try:
-                if config_dict_old[key] != value:
-                    change = 'Changed from: %s' % config_dict_old[key]
-            except KeyError:
-                    change = 'Changed from: None'
-            print '%s: %s %s' % (key.ljust(width_key), str(value).ljust(width_value), change)
+
+    width_key = 0
+    width_value = 0
+    for key, value in config_dict.iteritems():
+        width_key = max(width_key, len(key))
+        width_value = max(width_value, len(str(value)))
+    for key, value in config_dict.iteritems():
+        change = ''
+        try:
+            if config_dict_old[key] != value:
+                change = 'Changed from: %s' % config_dict_old[key]
+        except KeyError:
+                change = 'Changed from: None'
+        logging.info( '%s: %s %s' % (key.ljust(width_key), str(value).ljust(width_value), change) )
     try:
         open(args.config, 'w').write(json.dumps(config_dict, indent=4))
     except IOError:
-        print 'Could not update config file: ' + args.config
+        logging.error( 'Could not update config file: ' + args.config )
         raise
     config = Struct(**config_dict)
     if not 'folder' in config_dict.keys():
-        print 'Error: No root folder for local backups. Use the -f option to set.'
+        logging.error( 'Error: No root folder for local backups. Use the -f option to set.' )
         sys.exit(1)
     if os.path.isfile(config.lockfile):
         other_pid = open(config.lockfile).read()
         if check_pid(int(other_pid)):
-            print 'Another instance is already running. Pid: %s Lockfile: %s' % (other_pid, config.lockfile)
+            logging.error( 'Another instance is already running. Pid: %s Lockfile: %s' % (other_pid, config.lockfile) )
             sys.exit(1)
     try:
         open(config.lockfile, 'w').write(str(os.getpid()))
     except IOError as e:
-        print str(e)
+        logging.error( str(e) )
         sys.exit(1)
     dbx = login(config.token_path)
     #pprint.pprint(dir(dbx))
     account_info = dbx.users_get_current_account()
     #print repr(account_info.account_id)
     uid = account_info.account_id
-    if verbose: print '\nLogged in as %s, uid: %s' % (account_info.email, uid)
-    if verbose: print '\n[R] = Remote\n[L] = Local\n'
+    logging.info( 'Logged in as %s, uid: %s' % (account_info.email, uid) )
+    logging.info( '\n[R] = Remote\n[L] = Local\n')
     snapshot_now = os.path.join(config.folder.encode('utf8'), datetime.datetime.now().strftime("%Y-%m-%d %H:%M").encode('utf8'))
     snapshot_previous = False
     snapshot_count = 0
     for snapshot in sorted(os.listdir(config.folder), reverse=True):
-        if snapshot.endswith('incomplete'):
+        if snapshot.endswith('temp'):
             continue
         snapshot_count += 1
         snapshot = os.path.join(config.folder, snapshot)
@@ -364,20 +391,21 @@ def main():
                 snapshot_previous = snapshot
             elif snapshot_count > config.rotations:
                 cmd = ['rm', '-r', snapshot]
-                if verbose: print 'Removing old snapshot:',
-                print ' '.join(cmd)
+                print ('Removing old snapshot: ' + snapshot)
                 subprocess.call(cmd)
 
     checkpoint1 = time.time()
+    snapshot_temp = snapshot_now+' temp'
     snapshot_incomplete = snapshot_now+' incomplete'
     if snapshot_previous:
-        if verbose: print u'Previous snapshot: ' + snapshot_previous
-        cmd = ['cp', '-al', snapshot_previous, snapshot_incomplete]
-        if verbose:
-            print u'Creating a new snapshot at ' + snapshot_now
-            print ' '.join(cmd)
+        logging.info( u'Previous snapshot: ' + snapshot_previous )
+        cmd = ['cp', '-al', snapshot_previous, snapshot_temp]
+        print( u'Creating a new snapshot at ' + snapshot_now)
+        logging.info( ' '.join(cmd) )
         subprocess.call(cmd)
+        os.rename(snapshot_temp, snapshot_incomplete)
     checkpoint2 = time.time()
+    print 'Getting Dropbox remote file list ...'
     # Create 8 worker threads
     for x in range(8):
        worker = DownloadWorker(queue)
@@ -389,24 +417,29 @@ def main():
         download_folder(dbx, remote_folder.encode('utf8'), snapshot_incomplete)
     checkpoint3 = time.time()
     parsing = False
-    print ''
     wait_time = 0
-    queue_bytes_previous = queue_bytes + 0
+    disk_free_previous = disk_free(snapshot_incomplete)
     wait_string_len = 0
     speed = []
-    while not queue.empty():
-        speed = speed[-9:]+[queue_bytes_previous-queue_bytes]
-        wait_string = '  Waiting for %i downloads (%s) to complete. Current speed: %sps' % (queue.qsize(), human_size(queue_bytes), human_size(avg(speed)))
+    while not queue.empty() or len(transfers) > 0:
+        disk_free_now = disk_free(snapshot_incomplete)
+        speed = speed[-9:]+[disk_free_previous-disk_free_now]
+        transfer_sizes = 0
+        for t in transfers:
+            try:
+                transfer_sizes += os.path.getsize(t)
+            except OSError:
+                pass
+        wait_string = '  %i files currently downloading. %i files in queue. %s remaining. Current speed: %sps' % (len(transfers), queue.qsize(), human_size(queue_bytes - transfer_sizes), human_size(avg(speed)))
         wait_string.ljust(wait_string_len)
         sys.stdout.write(wait_string+'\r')
         wait_string_len = len(wait_string)
-        queue_bytes_previous = queue_bytes + 0
+        disk_free_previous = disk_free_now + 0
         sys.stdout.flush()
         time.sleep(1)
         wait_time += 1
     queue.join()
     checkpoint4 = time.time()
-    print ' ' * 100
     print '%s -> %s' % (snapshot_incomplete, snapshot_now)
     os.rename(snapshot_incomplete, snapshot_now)
     print 'Copying previous snapshot: %s' % human_time(checkpoint2 - checkpoint1)
@@ -414,7 +447,9 @@ def main():
     print 'Dropbox total time: %s' % human_time(checkpoint4 - checkpoint2)
     print 'Files/folders updated: %i/%i' % (update_count, total_count)
     print 'Downloaded: %s' % human_size(update_bytes)
-
+    atexit._exithandlers = []
+    while not queue.empty():
+        queue.get()
 
 if __name__ == '__main__':
     main()

@@ -182,32 +182,38 @@ def compare_folder(dbx, remote_folder, local_folder, job_path):
     remote_folder = remote_folder.rstrip(u'/') + u'/'
     global update_count, total_count, update_bytes, queue_bytes, listed_bytes, local_files
     status(remote_folder.encode('utf8'))
-    remote_list = api_call(dbx.files_list_folder, remote_folder).entries
+    if remote_folder == '/':
+        remote_list = api_call(dbx.files_list_folder, '').entries
+    else:
+        remote_list = api_call(dbx.files_list_folder, remote_folder).entries
     jobs = []
     total_count += 1
     if not os.path.isdir(local_folder):
-        jobs.append('+ '+remote_folder)
+        jobs.append(u'+ '+remote_folder)
     else:
-        jobs.append('  '+remote_folder)
+        jobs.append(u'  '+remote_folder)
     #print repr(job_path)
     #print repr(jobs)
-    open(job_path, 'a').write('\n'.join(jobs)+'\n')
+    open(job_path, 'a').write((u'\n'.join(jobs)+u'\n').encode('utf8'))
     jobs_dict = {}
     #print repr(remote_list)
     #print repr(remote_list)
-    local_folder_index = os.listdir(local_folder)
+    try:
+        local_folder_index = os.listdir(local_folder.decode('utf8'))
+    except OSError as e:
+        local_folder_index = []
     for item in sorted(remote_list):
         #print repr(item.name.encode('utf8'))
         remote_path = remote_folder+item.name
         is_folder = type(item) == dropbox.files.FolderMetadata
         local_file_path = local_folder+'/'+item.name.encode('utf8').replace('//', '/')
-        if item.name.encode('utf8') in local_folder_index:
-            local_folder_index.remove(item.name.encode('utf8'))
+        if item.name in local_folder_index:
+            local_folder_index.remove(item.name)
         if is_folder:
             compare_folder(dbx, remote_path, local_file_path, job_path) # Because recursive list_folder does not show correct case for parent folders :(
         else:
             total_count += 1
-            logging.debug( u'[R] ' + remote_path )
+            #logging.debug( u'[R] ' + remote_path )
             modified = False
             if not os.path.isfile(local_file_path):
                 modified = True
@@ -218,7 +224,7 @@ def compare_folder(dbx, remote_folder, local_folder, job_path):
                 if mtime_dt != item.client_modified and size != item.size:
                     modified = True
             if modified:
-                logging.info( u'[L] Added to download queue: ' + local_file_path )
+                #logging.info( '[L] Added to download queue: ' + local_file_path )
                 jobs_dict[remote_path+' %i' % item.size] = '+'
             else:
                 jobs_dict[remote_path+' %i' % item.size] = ' '
@@ -236,7 +242,7 @@ def compare_folder(dbx, remote_folder, local_folder, job_path):
     for j in sorted(jobs_dict):
         jobs.append(jobs_dict[j]+' '+j)
     jobs_dict = {}
-    open(job_path, 'a').write('\n'.join(jobs)+'\n')
+    open(job_path, 'a').write((u'\n'.join(jobs)+u'\n').encode('utf8'))
 
 def clear_line():
     sys.stdout.write("\033[K")
@@ -459,16 +465,16 @@ def main():
             elif action == 'u':
                 os.remove(local_path)
                 logging.info( 'u ' + local_path)
-                download_queue[path] = size
+                download_queue[path.decode('utf8')] = size
                 job_size += size
             elif action == '+':
                 logging.info( '+ ' + local_path)
-                download_queue[path] = size
+                download_queue[path.decode('utf8')] = size
                 job_size += size
     space = listed_bytes
     checkpoint4 = time.time()
     for path, size in sorted(download_queue.items(), key=operator.itemgetter(1)):
-        download_file(dbx, os.path.join(snapshot_incomplete, path.encode('utf8').lstrip('/')), path, size)
+        download_file(dbx, os.path.join(snapshot_incomplete.decode('utf8'), path.lstrip(u'/')), path, size)
     checkpoint5 = time.time()
     clear_line()
     print '\rDownloaded %s in %s' % (human_size( update_bytes ), human_time(checkpoint5-checkpoint4))

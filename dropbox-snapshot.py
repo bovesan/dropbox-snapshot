@@ -141,7 +141,7 @@ def api_call(fun, *args, **kwargs):
                 logging.error( str(e) )
                 raise
         except dropbox.exceptions.ApiError as e:
-            if attempt >= API_RETRY_MAX:
+            if attempt >= 0:
                 logging.error(   'API Error. Aborted after %i attempts.' % attempt )
                 logging.error( str(e) )
                 raise
@@ -267,15 +267,21 @@ def status(msg=' '):
             size_prev = size_now + 0.0
         print '\rDownloading: %s %5.2f%% Speed: %sps ' % (human_size(job_size), progress_download, human_size(speed)) + msg,
 
-def download_file(dbx, local_file_path, remote_path, size):
-    global update_count, total_count, update_bytes, queue_bytes
+def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
+    global update_count, total_count, update_bytes, queue_bytes, error_log_path
     #clear_line()
+    if skip_existing and os.path.isfile(local_file_path):
+        status(remote_path.encode('utf8')+' already exists')
+        return
     status(remote_path.encode('utf8'))
     try:
         api_call(dbx.files_download_to_file, local_file_path, remote_path)
         update_count += 1
         update_bytes += size
         queue_bytes -= size
+    except dropbox.exceptions.ApiError as e:
+        queue_bytes -= size
+        open(error_log_path, 'a').write(remote_path + ': ' + unicode(e)+u'\n')
     except:
         queue_bytes -= size
         raise
@@ -283,13 +289,14 @@ def download_file(dbx, local_file_path, remote_path, size):
 
 
 def main():
-    global uid, args, queue, queue_bytes, checkpoint1, job_path, space, listed_bytes, job_size
+    global uid, args, queue, queue_bytes, checkpoint1, job_path, space, listed_bytes, job_size, error_log_path
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)
     parser.add_argument("-f", "--folder", help="Set root folder for local backups.", default=False)
     parser.add_argument("remote_folder", nargs='*', help='Specify one or more remote folders to download. Defults to all (/)')
     parser.add_argument("-r", "--rotations", help="Maximum number of local sets before the oldest will be discarded", type=int)
+    parser.add_argument("-j", "--job", help="Resume an existing .job", default=False)
     parser.add_argument("-l", "--lockfile", help="By default, only one instance of this program should run at once. If you know what your are doing, you can set different lockfile paths for separate instances.", default=False)
     parser.add_argument("-t", "--token_path", help="Read/write to a custom token file (default: " + default_token_path + ")", default=False)
     #parser.add_argument("-n", "--do_nothing", help="Do not write anything to disk. Only show what would be done.", action="store_true")
@@ -392,49 +399,59 @@ def main():
     #print repr(account_info.account_id)
     uid = account_info.account_id
     logging.info( 'Logged in as %s, uid: %s' % (account_info.email, uid) )
-    logging.info( 'Space allocated: %s' % space )
-    logging.info( '\n[R] = Remote\n[L] = Local\n')
-    snapshot_now = os.path.join(config.folder.encode('utf8'), datetime.datetime.now().strftime("%Y-%m-%d %H:%M").encode('utf8'))
-    snapshot_previous = False
-    snapshot_count = 0
-    for snapshot in sorted(os.listdir(config.folder), reverse=True):
-        if snapshot.endswith('temp'):
-            continue
-        snapshot = os.path.join(config.folder, snapshot)
-        if not os.path.isdir(snapshot):
-            continue
-        snapshot_count += 1
-        if os.path.isdir(snapshot):
-            if not snapshot_previous:
-                snapshot_previous = snapshot
-            elif snapshot_count > config.rotations:
-                snapshot_job = snapshot.replace('.incomplete', '').replace('.temp', '') + '.job'
-                cmd = ['rm', '-r', snapshot]
-                if os.path.isfile(snapshot_job):
-                    cmd.append(snapshot_job)
-                print ('Removing old snapshot: ' + snapshot)
-                subprocess.call(cmd)
-
-    checkpoint1 = time.time()
-    snapshot_temp = snapshot_now+'.temp'
-    snapshot_incomplete = snapshot_now+'.incomplete'
-    job_path = snapshot_now+'.job'
-    if snapshot_previous:
-        logging.info( u'Previous snapshot: ' + snapshot_previous )
-        cmd = ['cp', '-al', snapshot_previous, snapshot_temp]
-        print( u'Creating new snapshot: ' + snapshot_now),
-        logging.info( ' '.join(cmd) )
-        subprocess.call(cmd)
-        os.rename(snapshot_temp, snapshot_incomplete)
-    checkpoint2 = time.time()
-    print 'Created new snapshot in %s' % (human_time(checkpoint2-checkpoint1))
-    #print 'Getting Dropbox remote file list ...'
     atexit.register(abort)
-    for remote_folder in config.remote_folders:
-        compare_folder(dbx, remote_folder, snapshot_incomplete+remote_folder, job_path)
-    checkpoint3 = time.time()
-    clear_line()
-    print '\rCompared %i items in %s' % (total_count, human_time(checkpoint3-checkpoint2))
+    if args.job:
+        job_path = args.job
+        snapshot_now = job_path.replace('.job', '')
+        snapshot_incomplete = job_path.replace('.job', '.incomplete')
+        error_log_path = snapshot_now+'.errors'
+        checkpoint1 = time.time()
+        checkpoint2 = time.time()
+        checkpoint3 = time.time()
+    else:
+        logging.info( 'Space allocated: %s' % space )
+        logging.info( '\n[R] = Remote\n[L] = Local\n')
+        snapshot_now = os.path.join(config.folder.encode('utf8'), datetime.datetime.now().strftime("%Y-%m-%d %H:%M").encode('utf8'))
+        snapshot_previous = False
+        snapshot_count = 0
+        for snapshot in sorted(os.listdir(config.folder), reverse=True):
+            if snapshot.endswith('temp'):
+                continue
+            snapshot = os.path.join(config.folder, snapshot)
+            if not os.path.isdir(snapshot):
+                continue
+            snapshot_count += 1
+            if os.path.isdir(snapshot):
+                if not snapshot_previous:
+                    snapshot_previous = snapshot
+                elif snapshot_count > config.rotations:
+                    snapshot_job = snapshot.replace('.incomplete', '').replace('.temp', '') + '.job'
+                    cmd = ['rm', '-r', snapshot]
+                    if os.path.isfile(snapshot_job):
+                        cmd.append(snapshot_job)
+                    print ('Removing old snapshot: ' + snapshot)
+                    subprocess.call(cmd)
+
+        checkpoint1 = time.time()
+        snapshot_temp = snapshot_now+'.temp'
+        snapshot_incomplete = snapshot_now+'.incomplete'
+        job_path = snapshot_now+'.job'
+        error_log_path = snapshot_now+'.errors'
+        if snapshot_previous:
+            logging.info( u'Previous snapshot: ' + snapshot_previous )
+            cmd = ['cp', '-al', snapshot_previous, snapshot_temp]
+            print( u'Creating new snapshot: ' + snapshot_now),
+            logging.info( ' '.join(cmd) )
+            subprocess.call(cmd)
+            os.rename(snapshot_temp, snapshot_incomplete)
+        checkpoint2 = time.time()
+        print 'Created new snapshot in %s' % (human_time(checkpoint2-checkpoint1))
+        #print 'Getting Dropbox remote file list ...'
+        for remote_folder in config.remote_folders:
+            compare_folder(dbx, remote_folder, snapshot_incomplete+remote_folder, job_path)
+        checkpoint3 = time.time()
+        clear_line()
+        print '\rCompared %i items in %s' % (total_count, human_time(checkpoint3-checkpoint2))
     logging.info('Updating local file structure and queuing downloads')
     download_queue = {}
     for line in open(job_path):
@@ -445,6 +462,8 @@ def main():
         path = line[2:]
         local_path = os.path.join(snapshot_incomplete, path.lstrip('/'))
         if path.endswith('/'): # is folder
+            if args.job and os.path.exists(local_path):
+                continue
             if action == '-':
                 cmd = ['rm', '-rv', local_path]
                 logging.info( '- ' + local_path)
@@ -459,6 +478,8 @@ def main():
             path, size = path.rsplit(' ', 1)
             size = int(size)
             local_path = os.path.join(snapshot_incomplete, path.lstrip('/'))
+            if args.job and os.path.exists(local_path):
+                continue
             if action == '-':
                 logging.info( '- ' + local_path)
                 os.remove(local_path)
@@ -474,7 +495,7 @@ def main():
     space = listed_bytes
     checkpoint4 = time.time()
     for path, size in sorted(download_queue.items(), key=operator.itemgetter(1)):
-        download_file(dbx, os.path.join(snapshot_incomplete.decode('utf8'), path.lstrip(u'/')), path, size)
+        download_file(dbx, os.path.join(snapshot_incomplete.decode('utf8'), path.lstrip(u'/')), path, size, skip_existing=args.job)
     checkpoint5 = time.time()
     clear_line()
     print '\rDownloaded %s in %s' % (human_size( update_bytes ), human_time(checkpoint5-checkpoint4))

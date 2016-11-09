@@ -128,7 +128,13 @@ def api_call(fun, *args, **kwargs):
             time.sleep(API_RETRY_DELAY)
         except requests.exceptions.ReadTimeout as e:
             if attempt >= API_RETRY_MAX:
-                logging.error(   'Could no receive data from server. Aborted after %i attempts.' % attempt )
+                logging.error(   'Could not receive data from server. Aborted after %i attempts.' % attempt )
+                logging.error( str(e) )
+                raise
+            time.sleep(API_RETRY_DELAY)
+        except requests.exceptions.ConnectionError as e:
+            if attempt >= API_RETRY_MAX:
+                logging.error(   'Connection error. Aborted after %i attempts.' % attempt )
                 logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
@@ -146,7 +152,6 @@ def api_call(fun, *args, **kwargs):
                 logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
-
         except:
             raise
     return response
@@ -281,8 +286,17 @@ def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
         queue_bytes -= size
     except dropbox.exceptions.ApiError as e:
         queue_bytes -= size
-        open(error_log_path, 'a').write(remote_path + ': ' + unicode(e)+u'\n')
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e) +'\n')   
+    except requests.exceptions.ReadTimeout as e:
+        queue_bytes -= size
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
+    except requests.exceptions.ConnectionError as e:
+        queue_bytes -= size
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')        
     except:
+        line = 'Fatal error' + remote_path.encode('utf8') + ': ' + str(e)+ '\n'
+        open(error_log_path, 'a').write(line)
+        print line
         queue_bytes -= size
         raise
 

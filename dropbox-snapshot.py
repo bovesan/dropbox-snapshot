@@ -28,6 +28,7 @@ time_prev = 0.0
 size_prev = 0.0
 job_size = 0
 speed = 0.0
+error_count = 0
 
 #logging.basicConfig(format='%(message)s')
 
@@ -62,26 +63,27 @@ def human_size(num, suffix='B'):
 
 def human_time(seconds):
     time_string = ''
+    seconds_left = seconds
 
     day = ( 24 * 60 * 60 )
-    days = math.floor(seconds / day)
-    seconds_left = seconds - (days * day)
+    days = math.floor(seconds_left / day)
+    seconds_left = seconds_left - (days * day)
     if days == 1:
         time_string += '1 day, '
     elif days > 1:
         time_string += '%i days, ' % days
 
     hour = ( 60 * 60 )
-    hours = math.floor(seconds / hour)
-    seconds_left = seconds - (hours * hour)
+    hours = math.floor(seconds_left / hour)
+    seconds_left = seconds_left - (hours * hour)
     if hours == 1:
         time_string += '1 hour, '
     elif hours > 1:
         time_string += '%i hours, ' % hours
 
     minute = 60
-    minutes = math.floor(seconds / minute)
-    seconds_left = seconds - (minutes * minute)
+    minutes = math.floor(seconds_left / minute)
+    seconds_left = seconds_left - (minutes * minute)
     if minutes == 1:
         time_string += '1 minute, '
     elif minutes > 1:
@@ -90,7 +92,7 @@ def human_time(seconds):
     if time_string != '':
         time_string += 'and '
 
-    time_string += '%4.2f seconds' % seconds_left
+    time_string += '%i seconds' % seconds_left
     return time_string
 
 def check_pid(pid):        
@@ -122,20 +124,20 @@ def api_call(fun, *args, **kwargs):
         except dropbox.exceptions.InternalServerError as e:
             request_id, status_code, body = e
             if attempt >= API_RETRY_MAX:
-                logging.error(  'There is an issue with the Dropbox server. Aborted after %i attempts.' % attempt )
-                logging.error( str(e) )
+                #logging.error(  'There is an issue with the Dropbox server. Aborted after %i attempts.' % attempt )
+                #logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
         except requests.exceptions.ReadTimeout as e:
             if attempt >= API_RETRY_MAX:
-                logging.error(   'Could not receive data from server. Aborted after %i attempts.' % attempt )
-                logging.error( str(e) )
+                # logging.error(   'Could not receive data from server. Aborted after %i attempts.' % attempt )
+                # logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
         except requests.exceptions.ConnectionError as e:
             if attempt >= API_RETRY_MAX:
-                logging.error(   'Connection error. Aborted after %i attempts.' % attempt )
-                logging.error( str(e) )
+                # logging.error(   'Connection error. Aborted after %i attempts.' % attempt )
+                # logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
         except dropbox.exceptions.RateLimitError as e:
@@ -143,13 +145,13 @@ def api_call(fun, *args, **kwargs):
             time.sleep(backoff)
             DELAY *= 1.1
             if attempt >= API_RETRY_MAX:
-                logging.error(   'Rate limit error. Aborted after %i attempts.' % attempt )
-                logging.error( str(e) )
+                # logging.error(   'Rate limit error. Aborted after %i attempts.' % attempt )
+                # logging.error( str(e) )
                 raise
         except dropbox.exceptions.ApiError as e:
             if attempt >= 0:
-                logging.error(   'API Error. Aborted after %i attempts.' % attempt )
-                logging.error( str(e) )
+                # logging.error(   'API Error. Aborted after %i attempts.' % attempt )
+                # logging.error( str(e) )
                 raise
             time.sleep(API_RETRY_DELAY)
         except:
@@ -204,14 +206,14 @@ def compare_folder(dbx, remote_folder, local_folder, job_path):
     #print repr(remote_list)
     #print repr(remote_list)
     try:
-        local_folder_index = os.listdir(local_folder.decode('utf8'))
+        local_folder_index = os.listdir(local_folder)
     except OSError as e:
         local_folder_index = []
     for item in sorted(remote_list):
         #print repr(item.name.encode('utf8'))
         remote_path = remote_folder+item.name
         is_folder = type(item) == dropbox.files.FolderMetadata
-        local_file_path = local_folder+'/'+item.name.encode('utf8').replace('//', '/')
+        local_file_path = (local_folder+u'/'+item.name).replace('//', '/')
         if item.name in local_folder_index:
             local_folder_index.remove(item.name)
         if is_folder:
@@ -236,12 +238,12 @@ def compare_folder(dbx, remote_folder, local_folder, job_path):
             listed_bytes += item.size
     for deleted in local_folder_index:
         deleted_path = os.path.join(local_folder, deleted)
-        remote_path = remote_folder.encode('utf8')+deleted
+        remote_path = remote_folder+unicode(deleted)
         #print '\n' + repr(deleted_path)
         if os.path.isdir(deleted_path):
-            jobs_dict[remote_path+'/'] = '-'
+            jobs_dict[remote_path+u'/'] = '-'
         else:
-            jobs_dict[remote_path+' 0'] = '-'
+            jobs_dict[remote_path+u' 0'] = '-'
     del(local_folder_index)
     jobs = []
     for j in sorted(jobs_dict):
@@ -254,7 +256,7 @@ def clear_line():
     sys.stdout.flush()
 
 def status(msg=' '):
-    global space, listed_bytes, update_bytes, job_size, free_space, time_prev, size_prev, speed
+    global space, listed_bytes, update_bytes, job_size, free_space, time_prev, size_prev, speed, error_count, checkpoint4
     clear_line()
     if listed_bytes < space:
         progress_compare = float(listed_bytes) / float(space)
@@ -262,7 +264,6 @@ def status(msg=' '):
         print '\rComparing: %5.2f%% ' % progress_compare + msg,
     else:
         progress_download = float(update_bytes) / float(job_size)
-        progress_download *= 100.0
         time_now = time.time()
         size_now = float(update_bytes)
         if time_now - time_prev > 2.0:
@@ -270,10 +271,14 @@ def status(msg=' '):
             size_log = [(time.time(), update_bytes)]
             time_prev = time_now + 0.0
             size_prev = size_now + 0.0
-        print '\rDownloading: %s %5.2f%% Speed: %sps ' % (human_size(job_size), progress_download, human_size(speed)) + msg,
+            if progress_download == 0.0:
+                etl = ''
+            else:
+                etl = ( ( time_now - checkpoint4 ) / progress_download) * ( 1.0 - progress_download )
+        print '\Total delta: %s %5.2f%% Speed: %sps ETL: %s' % (human_size(job_size), progress_download * 100.0, human_size(speed), human_time(etl)) + msg,
 
 def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
-    global update_count, total_count, update_bytes, queue_bytes, error_log_path
+    global update_count, total_count, update_bytes, queue_bytes, error_log_path, error_count
     #clear_line()
     if skip_existing and os.path.isfile(local_file_path):
         status(remote_path.encode('utf8')+' already exists')
@@ -286,16 +291,20 @@ def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
         queue_bytes -= size
     except dropbox.exceptions.ApiError as e:
         queue_bytes -= size
-        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e) +'\n')   
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e) +'\n')
+        error_count += 1  
     except requests.exceptions.ReadTimeout as e:
         queue_bytes -= size
         open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
+        error_count += 1  
     except requests.exceptions.ConnectionError as e:
         queue_bytes -= size
-        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')        
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
+        error_count += 1        
     except:
-        line = 'Fatal error' + remote_path.encode('utf8') + ': ' + str(e)+ '\n'
+        line = 'Unknown, fatal error ' + remote_path.encode('utf8') + '\n'
         open(error_log_path, 'a').write(line)
+        error_count += 1  
         print line
         queue_bytes -= size
         raise
@@ -303,7 +312,7 @@ def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
 
 
 def main():
-    global uid, args, queue, queue_bytes, checkpoint1, job_path, space, listed_bytes, job_size, error_log_path
+    global uid, args, queue, queue_bytes, checkpoint1, job_path, space, listed_bytes, job_size, error_log_path, checkpoint4
     parser = argparse.ArgumentParser(description=description)
     #parser.add_argument("-d", "--delay", help="Set a specific delay (in seconds) between calls, to stay below API rate limits.", type=float, default=False)
     parser.add_argument("-c", "--config", help="Read/write to a custom config file (default: " + default_config_path + ")", default=default_config_path)

@@ -256,7 +256,7 @@ def clear_line():
     sys.stdout.flush()
 
 def status(msg=' '):
-    global space, listed_bytes, update_bytes, job_size, free_space, time_prev, size_prev, speed, error_count, checkpoint4
+    global space, listed_bytes, update_bytes, job_size, free_space, time_prev, size_prev, speed, error_count, checkpoint4, etl
     clear_line()
     if listed_bytes < space:
         progress_compare = float(listed_bytes) / float(space)
@@ -274,8 +274,8 @@ def status(msg=' '):
             if progress_download == 0.0:
                 etl = ''
             else:
-                etl = ( ( time_now - checkpoint4 ) / progress_download) * ( 1.0 - progress_download )
-        print '\Total delta: %s %5.2f%% Speed: %sps ETL: %s' % (human_size(job_size), progress_download * 100.0, human_size(speed), human_time(etl)) + msg,
+                etl = human_time(( ( time_now - checkpoint4 ) / progress_download) * ( 1.0 - progress_download ))
+        print '\rTotal delta: %s %5.2f%% Speed: %sps ETL: %s' % (human_size(job_size), progress_download * 100.0, human_size(speed), etl) + msg,
 
 def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
     global update_count, total_count, update_bytes, queue_bytes, error_log_path, error_count

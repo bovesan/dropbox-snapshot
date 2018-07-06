@@ -2,6 +2,7 @@
 
 
 import sys, os, dropbox, time, argparse, json, datetime, subprocess, math, atexit, requests, logging, operator
+import errno
 from pprint import pprint
 from functools import partial
 
@@ -298,6 +299,12 @@ def download_file(dbx, local_file_path, remote_path, size, skip_existing=False):
         open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
         error_count += 1  
     except requests.exceptions.ConnectionError as e:
+        queue_bytes -= size
+        open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
+        error_count += 1        
+    except IOError as e:
+        if e.errno == errno.ENOSPC:
+            raise
         queue_bytes -= size
         open(error_log_path, 'a').write(remote_path.encode('utf8') + ': ' + str(e)+'\n')  
         error_count += 1        

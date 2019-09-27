@@ -2,9 +2,19 @@
   "name": "dsnapshot",
   "version": "1.0.0",
   "description": "Downloads and creates local snapshots of a user's Dropbox account.",
-  "main": "app.js",
+  "main": "dist/app.js",
+  "scripts": {
+  	"start": "tsc && node dist/app.js"
+  },
   "repository": "https://github.com/bovesan/dropbox-snapshot.git",
   "author": "Bengt Ove Sannes",
-  "license": "GNU GPL",
-  "private": false
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "dropbox": "^4.0.30"
+  },
+  "devDependencies": {
+    "tslint": "^5.20.0",
+    "typescript": "^3.6.3"
+  }
 }

@@ -1,0 +1,10 @@
+{
+  "name": "dsnapshot",
+  "version": "1.0.0",
+  "description": "Downloads and creates local snapshots of a user's Dropbox account.",
+  "main": "app.js",
+  "repository": "https://github.com/bovesan/dropbox-snapshot.git",
+  "author": "Bengt Ove Sannes",
+  "license": "GNU GPL",
+  "private": false
+}

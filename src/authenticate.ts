@@ -1,38 +1,15 @@
 import Dropbox from 'dropbox';
-import os from 'os';
-import fs from 'fs';
+// import os from 'os';
+// import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import config from './config';
 import authenticationPage from './authenticationPage';
+import prompt from './prompt';
 
-function prompt(message: string, abort: Promise<any>, timeout: number): Promise<string> {
-    return new Promise((resolve, reject) => {
-        process.stdout.write(message+' ');
-        process.stdin.on('data', (chunk: Buffer) => {
-            resolve(chunk.toString());
-        });
-        if (timeout){
-            setTimeout(()=>{
-                process.stdin.destroy();
-                reject(`No input received. Waited ${timeout*0.001} seconds.`);
-            }, timeout);
-        }
-        Promise.all([abort]).finally(() => {
-            process.stdin.destroy();
-            resolve();
-        });
-    })
-}
-
-export default function authenticate(dropbox: Dropbox.Dropbox): Promise<string> {
+export function getToken(dropbox: Dropbox.Dropbox): Promise<string> {
     return new Promise((resolve, reject) => {
         let token: string;
-        if (fs.existsSync(config.token_path)) {
-            token = fs.readFileSync(config.token_path).toString().trim();
-            dropbox.setAccessToken(token);
-            return resolve(token);
-        }
         const authenticationUrl = dropbox.getAuthenticationUrl('http://localhost:' + config.authPort + '/');
         console.log('Please visit this address to authenticate:');
         console.log(authenticationUrl);
@@ -40,7 +17,6 @@ export default function authenticate(dropbox: Dropbox.Dropbox): Promise<string> 
         const gotToken = new Promise((resolve, reject) => {
             const interval = setInterval(() => {
                 if (token) {
-                    console.log('Token resolved');
                     resolve(token);
                     clearInterval(interval);
                 }
@@ -78,21 +54,10 @@ export default function authenticate(dropbox: Dropbox.Dropbox): Promise<string> 
                 server.close();
                 rejectToken(error);
             });
-            // setTimeout(() => {
-            //     server.close();
-            //     prompt.
-            //     throw Error('Authentication timeout');
-            // }, 5 * 60 * 1000);
         }).then(resolvedToken => {
             token = resolvedToken as string;
             if (token) {
-                fs.mkdirSync(path.dirname(config.token_path), {
-                    recursive: true,
-                    mode: 0o700,
-                });
-                fs.writeFileSync(config.token_path, token);
-                dropbox.setAccessToken(token);
-                resolve();
+                resolve(token);
             }
             reject('Token undefined');
         }).catch(error => reject(error));

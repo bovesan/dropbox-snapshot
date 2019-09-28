@@ -25,7 +25,7 @@ function prompt(message: string, abort: Promise<any>, timeout: number): Promise<
     })
 }
 
-export function authorize(dropbox: Dropbox.Dropbox): Promise < string > {
+export default function authenticate(dropbox: Dropbox.Dropbox): Promise<string> {
     return new Promise((resolve, reject) => {
         let token: string;
         if (fs.existsSync(config.token_path)) {

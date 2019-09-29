@@ -20,6 +20,21 @@ export default class Job{
         fs.writeFileSync(this.jobPath, JSON.stringify(this, null, 2));
         log('path: '+this.jobPath);
     }
+    toJSON(){
+        // return JSON.stringify(this, function(this, key, value){
+        //     if (key === 'remoteIndex'){
+        //         return undefined;
+        //     } else {
+        //         return value;
+        //     }
+        // }, spaces);
+        return Object.entries(this).filter(([key, value]) => {
+            return key !== 'remoteIndex';
+        }).reduce((map, [key, value]) => {
+            (map as any)[key] = value;
+            return map;
+        }, {});
+    }
     get jobPath() {
         return path.join(this.rootFolder, this.timestamp + '.job');
     }

@@ -40,7 +40,12 @@ export default class DSnapshot {
     _job?: Job;
     status: Status = {};
     monitor?: Monitor;
-    constructor({ configPath }: { configPath: string }, monitor?: Monitor) {
+    remoteFolder?: string;
+    constructor({ configPath, remoteFolder }: { configPath: string, remoteFolder?: string }, monitor?: Monitor) {
+        if (remoteFolder) {
+            this.remoteFolder = remoteFolder;
+            log('Remote folder: ' + remoteFolder)
+        }
         this.monitor = monitor;
         this.configPath = configPath;
         if (fs.existsSync(this.configPath)) {
@@ -156,7 +161,7 @@ export default class DSnapshot {
                         });
                     } else {
                         listFolderResult = await this.dropbox.filesListFolder({
-                            path: '',
+                            path: this.remoteFolder || '',
                             recursive: true,
                         });
                     }

@@ -27,7 +27,7 @@ function monitor(status: Status){
         if (value.progress) {
             return (key.padEnd(20) + (value.progress * 100).toPrecision(3) + '%').padEnd(80);
         }
-    }).join(' | ') + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20) + '\r')
+    }).join(' | ') + `Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20) + '\r')
 }
 
 const program = new commander.Command();
@@ -36,13 +36,14 @@ program
     .description("Downloads and creates local snapshots of a user's Dropbox account.")
     .option('-c, --configPath <path>', 'Config file path.', environment.config_path)
     // .option('-l, --localRoot <path>', 'Local root folder.')
+    .option('-r, --remoteFolder <path>', 'Only process this remote folder')
     // .option('-r, --rotations', 'Maximum number of local snapshots before the oldest will be discarded.')
     // .option('-v, --verbose', 'Verbose output.')
     // .option('-d, --debug', 'Extra verbose output.')
     // .option('-n, --do-nothing', 'Do not write anything to disk. Only show what would be done.')
     // .option('-o, --own', 'Only download files owned by current Dropbox user.')
     // .option('-a, --all', 'Download all files in shared resources (opposite of -o).')
-    // .arguments('[remoteFolders...]');
+    // .arguments('[remoteFolder...]');
 
 program
     .command('authenticate')

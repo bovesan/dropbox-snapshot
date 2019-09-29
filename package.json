@@ -13,6 +13,7 @@
   "dependencies": {
     "bfj": "^7.0.1",
     "commander": "^3.0.2",
+    "debug": "^4.1.1",
     "diskusage": "^1.1.3",
     "dropbox": "^4.0.30",
     "isomorphic-fetch": "^2.2.1",
@@ -20,6 +21,7 @@
     "prompts": "^2.2.1"
   },
   "devDependencies": {
+    "@types/debug": "^4.1.5",
     "@types/isomorphic-fetch": "^0.0.35",
     "@types/node": "^12.7.8",
     "@types/prompts": "^2.0.1",

@@ -1,6 +1,9 @@
 import Dropbox from 'dropbox';
 import fs from 'fs';
 import path from 'path';
+import Debug from 'debug';
+
+const log = Debug('dsnapshot.job');
 
 export default class Job{
     rootFolder: string;
@@ -10,14 +13,12 @@ export default class Job{
     remoteIndex: any[] = [];
     startTime: number;
     timestamp: string;
-    log: (string?: string) => void;
-    constructor(rootFolder: string, log: (string?: string) => void){
+    constructor(rootFolder: string){
         this.rootFolder = rootFolder;
-        this.log = log;
         this.startTime = Date.now();
         this.timestamp = new Date(this.startTime).toISOString().split('T')[0];
         fs.writeFileSync(this.jobPath, JSON.stringify(this, null, 2));
-        this.log('Job '.padEnd(20) + this.jobPath);
+        log('path: '+this.jobPath);
     }
     get jobPath() {
         return path.join(this.rootFolder, this.timestamp + '.job');

@@ -10,6 +10,12 @@ import * as diskusage from 'diskusage';
 import prompt from './prompt';
 import bfj from 'bfj';
 import Job from './job';
+import Debug from 'debug';
+
+const log = Debug('dsnapshot');
+// log.log = function(...args: any[]){
+
+// }
 
 interface Config {
     token: string,
@@ -18,15 +24,24 @@ interface Config {
     // remoteFolders: string[],
     [key: string]: any,
 }
+export interface Monitor {
+    (status: Status): void
+}
+export interface Status {
+    [key: string]: {
+        progress?: number,
+    },
+}
 export default class DSnapshot {
     dropbox: DropboxTypes.Dropbox;
     authenticated = false;
     configPath: string;
     config: Config;
     _job?: Job;
-    log: (string?: string) => void;
-    constructor(log: (string?: string) => void , { configPath }: { configPath: string }) {
-        this.log = log;
+    status: Status = {};
+    monitor?: Monitor;
+    constructor({ configPath }: { configPath: string }, monitor?: Monitor) {
+        this.monitor = monitor;
         this.configPath = configPath;
         if (fs.existsSync(this.configPath)) {
             this.config = JSON.parse(fs.readFileSync(this.configPath).toString());
@@ -37,9 +52,19 @@ export default class DSnapshot {
     }
     get job(){
         if (!this._job){
-            this._job = new Job(this.config.localRoot, console.log);
+            this._job = new Job(this.config.localRoot);
         }
         return this._job;
+    }
+    updateStatus(operation: string, key: 'progress', value: any){
+        if (!this.monitor){
+            return;
+        }
+        if (!this.status[operation]){
+            this.status[operation] = {};
+        }
+        this.status[operation][key] = value;
+        this.monitor(this.status);
     }
     configure(key: string, newValue?: string){
         if (newValue !== undefined) {
@@ -60,9 +85,9 @@ export default class DSnapshot {
                 fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, '\t'));
             }
         } else if (this.config[key]){
-            this.log(this.config[key]);
+            log(this.config[key]);
         } else {
-            this.log(`${key} is not configured`);
+            log(`${key} is not configured`);
         }
     }
     validateConfig() {
@@ -77,7 +102,7 @@ export default class DSnapshot {
         }
         if (errors.length > 0){
             errors.forEach(line => {
-                this.log(line);
+                log(line);
             })
             process.exit(2);
         }
@@ -92,12 +117,12 @@ export default class DSnapshot {
         }).then(() => {
             this.dropbox.setAccessToken(this.config.token);
             return this.dropbox.usersGetCurrentAccount().then(user => {
-                this.log('Authenticated as: ' + user.name.display_name);
+                log('Authenticated as: ' + user.name.display_name);
                 this.authenticated = true;
             });
         });
     }
-    status() {
+    info() {
         this.validateConfig();
         const promises: Promise<string>[] = [];
         promises.push(this.dropbox.usersGetCurrentAccount().then(data => {
@@ -112,7 +137,7 @@ export default class DSnapshot {
            }));
         return Promise.all(promises).then((lines)=>{
             lines.forEach(line => {
-                this.log(line);
+                log(line);
             })
         });
     }
@@ -122,6 +147,7 @@ export default class DSnapshot {
         return new Promise(async (resolve, reject) => {
             this.job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
             let listFolderResult: Dropbox.files.ListFolderResult | undefined;
+            log(`Mapping remote (${prettyBytes(this.job.bytesTotal)})`)
             while (!listFolderResult || listFolderResult.has_more) {
                 try {
                     if (job.cursor) {
@@ -130,7 +156,7 @@ export default class DSnapshot {
                         });
                     } else {
                         listFolderResult = await this.dropbox.filesListFolder({
-                            path: '/Hangover',
+                            path: '',
                             recursive: true,
                         });
                     }
@@ -141,18 +167,21 @@ export default class DSnapshot {
                         }
                     });
                     job.remoteIndex.push(...listFolderResult.entries);
-                    // const timeSpent = Date.now() - startTime;
+                    this.updateStatus('Mapping remote', 'progress', job.bytesIndexed / job.bytesTotal);
+                                        // const timeSpent = Date.now() - startTime;
                     // const timeLeft = timeSpent * (1.0 - bytesIndexed / bytesUsed);
-                    process.stdout.write('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30));
+                    // log('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30), true);
+                    // process.stdout.write('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30));
                     // process.stdout.write(`\rGetting remote file info: ${prettyBytes(bytesIndexed)} / ${prettyBytes(bytesUsed)} ${((bytesIndexed / bytesUsed) * 100).toPrecision(3)}%. Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}     `);
                 } catch (error) {
                     reject(error);
                 }
             }
-            process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
-            this.log();
+            // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
+            // log('');
             fs.writeFileSync(this.job.jobPath, JSON.stringify(job, null, 2));
             await bfj.write(this.job.indexPath, job.remoteIndex).catch(error => reject(error));
+            log('Remote map: ' + this.job.indexPath);
             resolve();
         });
     }

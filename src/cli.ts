@@ -1,6 +1,12 @@
 import commander from 'commander';
 import environment from './config';
 import DSnapshot from './index';
+import { Status } from './index';
+import Debug from 'debug';
+import prettyBytes from 'pretty-bytes';
+
+Debug.enable('*');
+// const log = Debug('cli');
 
 function runPromiseAndExit(promise: Promise<any>) {
     let keepAlive = setInterval(() => {
@@ -14,6 +20,14 @@ function runPromiseAndExit(promise: Promise<any>) {
     }).finally(() => {
         clearInterval(keepAlive);
     });
+}
+
+function monitor(status: Status){
+    process.stdout.write('  '+Object.entries(status).map(([key, value]) => {
+        if (value.progress) {
+            return (key.padEnd(20) + (value.progress * 100).toPrecision(3) + '%').padEnd(80);
+        }
+    }).join(' | ') + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20) + '\r')
 }
 
 const program = new commander.Command();
@@ -34,28 +48,28 @@ program
     .command('authenticate')
     .description('Authenticate dropbox user.')
     .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(console.log, program as any).authenticate());
+        runPromiseAndExit(new DSnapshot(program as any, monitor).authenticate());
     });
 
 program
-    .command('status')
-    .description('Show remote and local status.')
+    .command('info')
+    .description('Show remote and local information.')
     .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(console.log, program as any).status());
+        runPromiseAndExit(new DSnapshot(program as any, monitor).info());
     });
 
 program
     .command('config <key> [newValue]')
     .description('Get or set a config value')
     .action(function(key, newValue) {
-        new DSnapshot(console.log, program as any).configure(key, newValue);
+        new DSnapshot(program as any, monitor).configure(key, newValue);
     });
 
 program
     .command('snapshot')
     .description('Create a new snapshot and download updated files.')
     .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(console.log, program as any).snapshot());
+        runPromiseAndExit(new DSnapshot(program as any, monitor).snapshot());
     });
 
 program.parse(process.argv);

@@ -1,4 +1,3 @@
-import commander from 'commander';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -10,20 +9,8 @@ import environment from './config';
 import * as diskusage from 'diskusage';
 import prompt from './prompt';
 import bfj from 'bfj';
+import Job from './job';
 
-function runPromiseAndExit(promise: Promise<any>) {
-    let keepAlive = setInterval(() => {
-        // process.stdout.write('.');
-    }, 1000);
-    promise.then(() => {
-        process.exit(0);
-    }).catch(error => {
-        console.error(error);
-        process.exit(1);
-    }).finally(() => {
-        clearInterval(keepAlive);
-    });
-}
 interface Config {
     token: string,
     localRoot: string,
@@ -31,27 +18,13 @@ interface Config {
     // remoteFolders: string[],
     [key: string]: any,
 }
-interface Job {
-    bytesIndexed: 0,
-    bytesTotal: number,
-    cursor?: Dropbox.files.ListFolderCursor,
-    remoteIndex: any[],
-    startTime: number,
-    timestamp: string,
-}
-class Client {
+export default class DSnapshot {
     dropbox: DropboxTypes.Dropbox;
     authenticated = false;
     configPath: string;
     config: Config;
     _job?: Job;
     log: (string?: string) => void;
-    // remoteIndex: {
-    //     path: string,
-    //     size?: number,
-    //     date?: string,
-    //     hash?: string,
-    // }[] = [];
     constructor(log: (string?: string) => void , { configPath }: { configPath: string }) {
         this.log = log;
         this.configPath = configPath;
@@ -61,6 +34,12 @@ class Client {
             this.config = {} as Config;
         }
         this.dropbox = new Dropbox.Dropbox({ clientId: environment.clientId, fetch });
+    }
+    get job(){
+        if (!this._job){
+            this._job = new Job(this.config.localRoot, console.log);
+        }
+        return this._job;
     }
     configure(key: string, newValue?: string){
         if (newValue !== undefined) {
@@ -137,28 +116,6 @@ class Client {
             })
         });
     }
-    get job(): Job {
-        if (!this._job) {
-            const startTime = Date.now();
-            const timestamp = new Date(startTime).toISOString().split('T')[0];
-            this._job = {
-                bytesTotal: 0,
-                bytesIndexed: 0,
-                startTime,
-                timestamp,
-                remoteIndex: [],
-            }
-            fs.writeFileSync(this.jobPath, JSON.stringify(this._job, null, 2));
-            this.log('Job '.padEnd(20) + this.jobPath);
-        }
-        return this._job;
-    }
-    get jobPath() {
-        return path.join(this.config.localRoot, this.job.timestamp + '.job');
-    }
-    get indexPath() {
-        return path.join(this.config.localRoot, this.job.timestamp + '.index');
-    }
     mapRemote() {
         this.validateConfig();
         const job = this.job;
@@ -194,8 +151,8 @@ class Client {
             }
             process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
             this.log();
-            fs.writeFileSync(this.jobPath, JSON.stringify(job, null, 2));
-            await bfj.write(this.indexPath, job.remoteIndex).catch(error => reject(error));
+            fs.writeFileSync(this.job.jobPath, JSON.stringify(job, null, 2));
+            await bfj.write(this.job.indexPath, job.remoteIndex).catch(error => reject(error));
             resolve();
         });
     }
@@ -210,53 +167,4 @@ class Client {
     //     return Promise.all(this.promises);
     // }
     
-}
-
-if (require.main === module) {
-    const program = new commander.Command();
-    program
-        .version('1.0.0')
-        .description("Downloads and creates local snapshots of a user's Dropbox account.")
-        .option('-c, --configPath <path>', 'Config file path.', environment.config_path)
-        // .option('-l, --localRoot <path>', 'Local root folder.')
-        // .option('-r, --rotations', 'Maximum number of local snapshots before the oldest will be discarded.')
-        // .option('-v, --verbose', 'Verbose output.')
-        // .option('-d, --debug', 'Extra verbose output.')
-        // .option('-n, --do-nothing', 'Do not write anything to disk. Only show what would be done.')
-        // .option('-o, --own', 'Only download files owned by current Dropbox user.')
-        // .option('-a, --all', 'Download all files in shared resources (opposite of -o).')
-        // .arguments('[remoteFolders...]');
-
-    program
-        .command('authenticate')
-        .description('Authenticate dropbox user.')
-        .action(function(cmd, options) {
-            runPromiseAndExit(new Client(console.log, program as any).authenticate());
-        });
-
-    program
-        .command('status')
-        .description('Show remote and local status.')
-        .action(function(cmd, options) {
-            runPromiseAndExit(new Client(console.log, program as any).status());
-        });
-
-    program
-        .command('config <key> [newValue]')
-        .description('Get or set a config value')
-        .action(function(key, newValue) {
-            new Client(console.log, program as any).configure(key, newValue);
-        });
-
-    program
-        .command('snapshot')
-        .description('Create a new snapshot and download updated files.')
-        .action(function(cmd, options) {
-            runPromiseAndExit(new Client(console.log, program as any).snapshot());
-        });
-
-    program.parse(process.argv);
-    if (process.argv.length < 3) {
-        program.outputHelp();
-    }
 }

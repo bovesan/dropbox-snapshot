@@ -2,10 +2,9 @@ import commander from 'commander';
 import environment from './config';
 import DSnapshot from './index';
 import { Status } from './index';
-import Debug from 'debug';
 import prettyBytes from 'pretty-bytes';
+import log from './log';
 
-Debug.enable('*');
 // const log = Debug('cli');
 
 function runPromiseAndExit(promise: Promise<any>) {
@@ -25,7 +24,7 @@ function runPromiseAndExit(promise: Promise<any>) {
 function monitor(status: Status){
     process.stdout.write('  '+Object.entries(status).map(([key, value]) => {
         if (value.progress) {
-            return (key.padEnd(20) + (value.progress * 100).toPrecision(3) + '%').padEnd(80);
+            return (key.padEnd(20) + (value.progress * 100).toPrecision(3) + '%').padEnd(40);
         }
     }).join(' | ') + `Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20) + '\r')
 }
@@ -38,12 +37,15 @@ program
     // .option('-l, --localRoot <path>', 'Local root folder.')
     .option('-r, --remoteFolder <path>', 'Only process this remote folder')
     // .option('-r, --rotations', 'Maximum number of local snapshots before the oldest will be discarded.')
-    // .option('-v, --verbose', 'Verbose output.')
-    // .option('-d, --debug', 'Extra verbose output.')
+    .option('-v, --verbose', 'Verbose output.', ()=>log.enable('verbose'))
+    .option('-d, --debug', 'Extra verbose output.', () => log.enable('verbose').enable('debug'))
     // .option('-n, --do-nothing', 'Do not write anything to disk. Only show what would be done.')
     // .option('-o, --own', 'Only download files owned by current Dropbox user.')
     // .option('-a, --all', 'Download all files in shared resources (opposite of -o).')
     // .arguments('[remoteFolder...]');
+
+program
+    .on
 
 program
     .command('authenticate')

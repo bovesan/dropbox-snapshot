@@ -10,9 +10,9 @@ import * as diskusage from 'diskusage';
 import prompt from './prompt';
 import bfj from 'bfj';
 import Job from './job';
-import Debug from 'debug';
-
-const log = Debug('dsnapshot');
+import https from 'https';
+import http from 'http';
+import log from './log';
 // log.log = function(...args: any[]){
 
 // }
@@ -44,7 +44,7 @@ export default class DSnapshot {
     constructor({ configPath, remoteFolder }: { configPath: string, remoteFolder?: string }, monitor?: Monitor) {
         if (remoteFolder) {
             this.remoteFolder = remoteFolder;
-            log('Remote folder: ' + remoteFolder)
+            log.info('Remote folder: ' + remoteFolder)
         }
         this.monitor = monitor;
         this.configPath = configPath;
@@ -55,23 +55,23 @@ export default class DSnapshot {
         }
         this.dropbox = new Dropbox.Dropbox({ clientId: environment.clientId, fetch });
     }
-    get job(){
-        if (!this._job){
+    get job() {
+        if (!this._job) {
             this._job = new Job(this.config.localRoot);
         }
         return this._job;
     }
-    updateStatus(operation: string, key: 'progress', value: any){
-        if (!this.monitor){
+    updateStatus(operation: string, key: 'progress', value: any) {
+        if (!this.monitor) {
             return;
         }
-        if (!this.status[operation]){
+        if (!this.status[operation]) {
             this.status[operation] = {};
         }
         this.status[operation][key] = value;
         this.monitor(this.status);
     }
-    configure(key: string, newValue?: string){
+    configure(key: string, newValue?: string) {
         if (newValue !== undefined) {
             if (['rotations'].includes(key)) {
                 this.config[key] = parseInt(newValue);
@@ -89,10 +89,10 @@ export default class DSnapshot {
             } else {
                 fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, '\t'));
             }
-        } else if (this.config[key]){
-            log(this.config[key]);
+        } else if (this.config[key]) {
+            log.info(this.config[key]);
         } else {
-            log(`${key} is not configured`);
+            log.info(`${key} is not configured`);
         }
     }
     validateConfig() {
@@ -105,9 +105,9 @@ export default class DSnapshot {
         } else {
             this.dropbox.setAccessToken(this.config.token);
         }
-        if (errors.length > 0){
+        if (errors.length > 0) {
             errors.forEach(line => {
-                log(line);
+                log.info(line);
             })
             process.exit(2);
         }
@@ -122,7 +122,7 @@ export default class DSnapshot {
         }).then(() => {
             this.dropbox.setAccessToken(this.config.token);
             return this.dropbox.usersGetCurrentAccount().then(user => {
-                log('Authenticated as: ' + user.name.display_name);
+                log.info('Authenticated as: ' + user.name.display_name);
                 this.authenticated = true;
             });
         });
@@ -138,11 +138,11 @@ export default class DSnapshot {
         }));
         promises.push(diskusage.check(this.config.localRoot).then(data => {
             const used = data.total - data.free;
-            return `Local usage: ${prettyBytes(used)}/${prettyBytes(data.total)} (${((used/data.total)*100).toPrecision(4)}%)`;
-           }));
-        return Promise.all(promises).then((lines)=>{
+            return `Local usage: ${prettyBytes(used)}/${prettyBytes(data.total)} (${((used / data.total) * 100).toPrecision(4)}%)`;
+        }));
+        return Promise.all(promises).then((lines) => {
             lines.forEach(line => {
-                log(line);
+                log.info(line);
             })
         });
     }
@@ -152,7 +152,7 @@ export default class DSnapshot {
         return new Promise(async (resolve, reject) => {
             this.job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
             let listFolderResult: Dropbox.files.ListFolderResult | undefined;
-            log(`Mapping remote (${prettyBytes(this.job.bytesTotal)})`)
+            log.info(`Mapping remote (${prettyBytes(this.job.bytesTotal)})`)
             while (!listFolderResult || listFolderResult.has_more) {
                 try {
                     if (job.cursor) {
@@ -171,9 +171,9 @@ export default class DSnapshot {
                             job.bytesIndexed += (entry as Dropbox.files.FileMetadataReference).size;
                         }
                     });
-                    job.remoteIndex.push(...listFolderResult.entries);
+                    job.map.push(...listFolderResult.entries);
                     this.updateStatus('Mapping remote', 'progress', job.bytesIndexed / job.bytesTotal);
-                                        // const timeSpent = Date.now() - startTime;
+                    // const timeSpent = Date.now() - startTime;
                     // const timeLeft = timeSpent * (1.0 - bytesIndexed / bytesUsed);
                     // log('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30), true);
                     // process.stdout.write('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30));
@@ -184,10 +184,99 @@ export default class DSnapshot {
             }
             // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
             // log('');
-            fs.writeFileSync(this.job.jobPath, JSON.stringify(job, null, 2));
-            await bfj.write(this.job.indexPath, job.remoteIndex).catch(error => reject(error));
-            log('Remote map: ' + this.job.indexPath);
+            job.mapComplete = true;
+            job.mapLength = job.map.length;
+            fs.writeFileSync(job.jobPath, JSON.stringify(job, null, 2));
+            log.info(`Writing map to disk ...`)
+            await bfj.write(job.mapPath, job.map).catch(error => reject(error));
+            log.info('Wrote map: ' + job.mapPath);
             resolve();
+        });
+    }
+    processMap() {
+        this.validateConfig();
+        const job = this.job;
+        return new Promise(async (resolve, reject) => {
+            while (job.processIndex < job.mapLength) {
+                const entry = job.map[job.processIndex];
+                if (entry.path_display && entry.path_lower) {
+                    const localPath = path.join(job.rootFolder, job.timestamp, entry.path_display!);
+                    switch (entry['.tag']) {
+                        case 'folder':
+                            fs.mkdirSync(localPath, { recursive: true });
+                            break;
+                        case 'file':
+                            if (fs.existsSync(localPath)) {
+                                log.verbose(entry.path_display+' Already resolved');
+                                break;
+                            }
+                            log.debug(`${entry.path_display} ${entry.size} ${entry.server_modified}`);
+                            if (job.previousTimestamp) {
+                                const previousLocalPath = path.join(job.rootFolder, job.previousTimestamp, entry.path_display!);
+                                if (fs.existsSync(previousLocalPath)) {
+                                    const stat = fs.statSync(previousLocalPath);
+                                    log.debug(`${entry.path_display} ${previousLocalPath} ${stat.size} ${stat.mtime.toISOString()}`);
+                                    if (stat.size === entry.size && stat.mtime.toISOString() === entry.server_modified) {
+                                        log.verbose(`${entry.path_display} -> ${previousLocalPath}`);
+                                        fs.linkSync(previousLocalPath, localPath);
+                                        break;
+                                    }
+                                } else {
+                                    log.debug(`${entry.path_display} Does not exist in previous snapshot.`);
+                                }
+                            }
+                            log.verbose(`${entry.path_display} Downloading ${prettyBytes(entry.size)}`);
+                            const metadata = {
+                                localPath,
+                                server_modified: new Date(entry.server_modified),
+                            }
+                            await new Promise((resolveDownload, rejectDownload) => {
+                                const request = https.get('https://content.dropboxapi.com/2/files/download', {
+                                    headers: {
+                                        'Authorization': `Bearer ${this.config.token}`,
+                                        'Dropbox-API-Arg': JSON.stringify({ path: entry.id }),
+                                    },
+
+                                }, (response) => {
+                                    if (response.statusCode === 200) {
+                                        log.debug(`${entry.path_display} Receiving ...`);
+                                        const writeStream = fs.createWriteStream(metadata.localPath);
+                                        response.pipe(writeStream);
+                                            response.on('end', () => {
+                                            log.debug(`${entry.path_display} received. Setting times.`);
+                                            fs.utimes(metadata.localPath, metadata.server_modified, metadata.server_modified, () => { });
+                                            resolveDownload();
+                                        });
+                                    } else if (response.statusCode){
+                                        response.on('data', data => {
+                                            log.info(entry.path_display+' '+data.toString());
+                                            rejectDownload();
+                                        });
+                                    } else {
+                                        log.info(entry.path_display+' No response from server.');
+                                        rejectDownload();
+                                    }
+                                });
+                            }).catch(error => {
+                                //
+                            });
+                            break;
+
+                        default:
+                            // code...
+                            break;
+                    }
+                }
+                job.processIndex++;
+            }
+            if (!this.job.mapComplete) {
+                // log('Local operations caught up with map, but map is not complete. Waiting 1 second.')
+                setTimeout(() => {
+                    resolve(this.processMap());
+                }, 1000);
+            } else {
+                resolve();
+            }
         });
     }
     snapshot() {
@@ -195,10 +284,11 @@ export default class DSnapshot {
         const job = this.job;
         const promises: Promise<any>[] = [];
         promises.push(this.mapRemote());
+        promises.push(this.processMap());
         return Promise.all(promises);
     }
     // async wait() {
     //     return Promise.all(this.promises);
     // }
-    
+
 }

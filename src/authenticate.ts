@@ -6,17 +6,15 @@ import path from 'path';
 import config from './config';
 import authenticationPage from './authenticationPage';
 import prompt from './prompt';
-import Debug from 'debug';
-
-const log = Debug('dsnapshot.auth');
+import log from './log';
 
 export function getToken(dropbox: Dropbox.Dropbox): Promise<string> {
     return new Promise((resolve, reject) => {
         let token: string;
         const authenticationUrl = dropbox.getAuthenticationUrl('http://localhost:' + config.authPort + '/');
-        log('Please visit this address to authenticate:');
-        log(authenticationUrl);
-        log('If you authenticate on another device, you will be unable to connect to this program. No worries! Just paste the failed address below.');
+        log.info('Please visit this address to authenticate:');
+        log.info(authenticationUrl);
+        log.info('If you authenticate on another device, you will be unable to connect to this program. No worries! Just paste the failed address below.');
         const gotToken = new Promise((resolve, reject) => {
             const interval = setInterval(() => {
                 if (token) {

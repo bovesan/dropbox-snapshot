@@ -28,7 +28,8 @@ function monitor(status: Status){
             return key + ': '+(value.status).padEnd(50);
         }
         if (value.progress) {
-            return key + ': ' + ((value.progress * 100).toPrecision(3) + '%').padEnd(10) + ' ETL: ' + (etl(value.starttime, value.updatetime, value.progress).padEnd(20));
+            const etlString = value.progress < 1 ? ' ETL: ' + etl(value.starttime, value.updatetime, value.progress) : ''
+            return key + ': ' + ((value.progress * 100).toPrecision(3) + '%').padEnd(10) + etlString.padEnd(25);
         }
     }).join('') + (`Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20)) + '\r';
     process.env.linebuffer = line;

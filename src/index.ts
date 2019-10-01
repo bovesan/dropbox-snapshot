@@ -209,11 +209,11 @@ export default class DSnapshot {
                 } catch (error) {
                     reject(error);
                 }
+                job.mapLength = job.map.length;
             }
             // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
             // log('');
             job.mapComplete = true;
-            job.mapLength = job.map.length;
             fs.writeFileSync(job.jobPath, JSON.stringify(job, null, 2));
             log.info(`Writing map to disk ...`)
             await bfj.write(job.mapPath, job.map).catch(error => reject(error));

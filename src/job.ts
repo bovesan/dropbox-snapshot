@@ -5,16 +5,18 @@ import log from './log';
 
 export default class Job {
     rootFolder: string;
-    bytesIndexed = 0;
     bytesTotal = 0;
+    bytesIndexed = 0;
+    bytesProcessed = 0;
     cursor?: Dropbox.files.ListFolderCursor;
     map: (Dropbox.files.FileMetadataReference | Dropbox.files.FolderMetadataReference | Dropbox.files.DeletedMetadataReference)[] = [];
     startTime: number;
     timestamp: string;
-    previousTimestamp?: string;
+    previousSnapshot?: string;
     mapComplete = false;
     mapLength = 0;
     processIndex = 0;
+    folder: string;
     constructor(rootFolder: string) {
         this.rootFolder = rootFolder;
         this.startTime = Date.now();
@@ -23,22 +25,29 @@ export default class Job {
         existingJobs.forEach(basename => {
             const filePath = path.join(rootFolder, basename);
             if (fs.statSync(filePath).isDirectory()) {
+                if (basename.endsWith('.incomplete')) {
+                    log.debug('Incomplete snapshot: ' + basename);
+                    return;
+                }
                 log.debug('Existing folder: ' + basename);
                 try {
                     const timestamp = basename.match(/^\d{4}\-\d{2}\-\d{2}/)![0];
-                    if (timestamp != this.timestamp) {
-                        this.previousTimestamp = basename;
-                        log.verbose('Existing timestamp: ' + this.previousTimestamp);
+                    if (timestamp === this.timestamp) {
+                        throw Error('A folder with this timestamp already exists: ' + basename);
+                    } else {
+                        this.previousSnapshot = basename;
+                        log.verbose('Existing timestamp: ' + this.previousSnapshot);
                     }
                 } catch {
                     // Not a timestamped directory
                 }
             }
         });
-        if (this.previousTimestamp){
-            log.info('Previous job: ' + this.previousTimestamp);
+        if (this.previousSnapshot) {
+            log.info('Previous snapshot: ' + this.previousSnapshot);
         }
-        fs.writeFileSync(this.jobPath, JSON.stringify(this, null, 2));
+        this.write();
+        this.folder = path.join(this.rootFolder, this.timestamp+'.incomplete');
         log.info('path: ' + this.jobPath);
     }
     toJSON() {
@@ -56,10 +65,19 @@ export default class Job {
             return map;
         }, {});
     }
+    write(){
+        fs.writeFileSync(this.jobPath, JSON.stringify(this, null, 2));
+    }
     get jobPath() {
         return path.join(this.rootFolder, this.timestamp + '.job');
     }
     get mapPath() {
         return path.join(this.rootFolder, this.timestamp + '.map');
+    }
+    completeFolder(){
+        const oldFolder = this.folder;
+        this.folder = path.join(this.rootFolder, this.timestamp);
+        fs.renameSync(oldFolder, this.folder);
+        this.write();
     }
 }

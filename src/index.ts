@@ -13,6 +13,7 @@ import Job from './job';
 import https from 'https';
 import http from 'http';
 import log from './log';
+import Stats from './stats';
 // log.log = function(...args: any[]){
 
 // }
@@ -29,7 +30,10 @@ export interface Monitor {
 }
 export interface Status {
     [key: string]: {
+        starttime: number,
+        updatetime: number,
         progress?: number,
+        status?: string,
     },
 }
 export default class DSnapshot {
@@ -61,14 +65,20 @@ export default class DSnapshot {
         }
         return this._job;
     }
-    updateStatus(operation: string, key: 'progress', value: any) {
+    updateStatus(operation: string, key: 'progress' | 'status', value: any) {
         if (!this.monitor) {
             return;
         }
         if (!this.status[operation]) {
-            this.status[operation] = {};
+            const time = Date.now();
+            this.status[operation] = {
+                starttime: time,
+                updatetime: time,
+            };
         }
+        //@ts-ignore
         this.status[operation][key] = value;
+        this.status[operation].updatetime = Date.now();
         this.monitor(this.status);
     }
     configure(key: string, newValue?: string) {
@@ -197,22 +207,30 @@ export default class DSnapshot {
         this.validateConfig();
         const job = this.job;
         return new Promise(async (resolve, reject) => {
+            const stats = new Stats();
+            stats.onUpdate = (value) => {
+                const progress = value / job.bytesTotal;
+                // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
+                let status = (progress * 100).toPrecision(3) + '%';
+                status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(progress);
+                this.updateStatus('Resolving files', 'status', status);
+            }
             while (job.processIndex < job.mapLength) {
                 const entry = job.map[job.processIndex];
                 if (entry.path_display && entry.path_lower) {
-                    const localPath = path.join(job.rootFolder, job.timestamp, entry.path_display!);
+                    const localPath = path.join(job.folder, entry.path_display!);
                     switch (entry['.tag']) {
                         case 'folder':
                             fs.mkdirSync(localPath, { recursive: true });
                             break;
                         case 'file':
-                            if (fs.existsSync(localPath)) {
+                            if (fs.existsSync(localPath) && fs.statSync(localPath).size === entry.size) {
                                 log.verbose(entry.path_display+' Already resolved');
                                 break;
                             }
                             log.debug(`${entry.path_display} ${entry.size} ${entry.server_modified}`);
-                            if (job.previousTimestamp) {
-                                const previousLocalPath = path.join(job.rootFolder, job.previousTimestamp, entry.path_display!);
+                            if (job.previousSnapshot) {
+                                const previousLocalPath = path.join(job.rootFolder, job.previousSnapshot, entry.path_display!);
                                 if (fs.existsSync(previousLocalPath)) {
                                     const stat = fs.statSync(previousLocalPath);
                                     log.debug(`${entry.path_display} ${previousLocalPath} ${stat.size} ${stat.mtime.toISOString()}`);
@@ -230,7 +248,8 @@ export default class DSnapshot {
                                 localPath,
                                 server_modified: new Date(entry.server_modified),
                             }
-                            await new Promise((resolveDownload, rejectDownload) => {
+                            await new Promise((resolveDownload: (value:number) => void, rejectDownload) => {
+                                let downloadedBytes = 0;
                                 const request = https.get('https://content.dropboxapi.com/2/files/download', {
                                     headers: {
                                         'Authorization': `Bearer ${this.config.token}`,
@@ -242,10 +261,14 @@ export default class DSnapshot {
                                         log.debug(`${entry.path_display} Receiving ...`);
                                         const writeStream = fs.createWriteStream(metadata.localPath);
                                         response.pipe(writeStream);
-                                            response.on('end', () => {
+                                        response.on('data', data => {
+                                            downloadedBytes += data.length;
+                                            stats.log(job.bytesProcessed + downloadedBytes);
+                                        });
+                                        response.on('end', () => {
                                             log.debug(`${entry.path_display} received. Setting times.`);
                                             fs.utimes(metadata.localPath, metadata.server_modified, metadata.server_modified, () => { });
-                                            resolveDownload();
+                                            resolveDownload(downloadedBytes);
                                         });
                                     } else if (response.statusCode){
                                         response.on('data', data => {
@@ -257,8 +280,10 @@ export default class DSnapshot {
                                         rejectDownload();
                                     }
                                 });
+                            }).then(bytes => {
+                                job.bytesProcessed += bytes;
                             }).catch(error => {
-                                //
+                                job.bytesProcessed += entry.size;
                             });
                             break;
 
@@ -267,14 +292,18 @@ export default class DSnapshot {
                             break;
                     }
                 }
+                stats.log(job.bytesProcessed);
                 job.processIndex++;
             }
             if (!this.job.mapComplete) {
-                // log('Local operations caught up with map, but map is not complete. Waiting 1 second.')
+                log.debug('Local operations caught up with map, but map is not complete. Waiting 1 second.')
                 setTimeout(() => {
                     resolve(this.processMap());
                 }, 1000);
             } else {
+                if (job.bytesProcessed >= job.bytesTotal){
+                    job.completeFolder();
+                }
                 resolve();
             }
         });

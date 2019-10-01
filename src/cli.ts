@@ -4,6 +4,7 @@ import DSnapshot from './index';
 import { Status } from './index';
 import prettyBytes from 'pretty-bytes';
 import log from './log';
+import { etl } from './stats';
 
 // const log = Debug('cli');
 
@@ -22,11 +23,16 @@ function runPromiseAndExit(promise: Promise<any>) {
 }
 
 function monitor(status: Status){
-    process.stdout.write('  '+Object.entries(status).map(([key, value]) => {
-        if (value.progress) {
-            return (key.padEnd(20) + (value.progress * 100).toPrecision(3) + '%').padEnd(40);
+    const line = '  ' + Object.entries(status).map(([key, value]) => {
+        if (value.status) {
+            return key + ': '+(value.status).padEnd(50);
         }
-    }).join(' | ') + `Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20) + '\r')
+        if (value.progress) {
+            return key + ': ' + ((value.progress * 100).toPrecision(3) + '%').padEnd(10) + ' ETL: ' + (etl(value.starttime, value.updatetime, value.progress).padEnd(20));
+        }
+    }).join('') + (`Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20)) + '\r';
+    process.env.linebuffer = line;
+    process.stdout.write(line)
 }
 
 const program = new commander.Command();

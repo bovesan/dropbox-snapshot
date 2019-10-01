@@ -71,7 +71,7 @@ export default class {
 			time: Date.now(),
 			value,
 		}
-		if (now.time > this.seconds[0].time + 1000) {
+		if (this.seconds.length < 61 || now.time > this.seconds[0].time + 1000) {
 			if (this.onUpdate) {
 				this.onUpdate(value);
 			}
@@ -88,16 +88,15 @@ export default class {
 		}
 	}
 	get lastMinute(){
-		if (this.seconds.length >= 61){
-			return this.seconds[this.seconds.length - 61].value - this.seconds[this.seconds.length - 1].value;
-		}
-		// Extrapolate
 		const value = this.seconds[0].value - this.seconds[this.seconds.length - 1].value;
 		const timespan = this.seconds[0].time - this.seconds[this.seconds.length - 1].time;
 		return value * (60000.0 / timespan) | 0;
 	}
-	etl(progress: number){
+	etl(progress: number) {
 		return etl(this.starttime, this.seconds[0].time, progress);
+	}
+	get elapsed() {
+		return humanDuration(this.seconds[0].time - this.starttime);
 	}
 
 }

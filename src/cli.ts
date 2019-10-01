@@ -13,7 +13,7 @@ function runPromiseAndExit(promise: Promise<any>) {
         // process.stdout.write('.');
     }, 1000);
     promise.then(() => {
-        process.exit(0);
+        // process.exit(0);
     }).catch(error => {
         console.error(error);
         process.exit(1);

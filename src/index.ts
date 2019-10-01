@@ -14,9 +14,27 @@ import https from 'https';
 import http from 'http';
 import log from './log';
 import Stats from './stats';
+import { humanDuration } from './stats';
+import DropboxContentHasher from 'dropbox-api-content-hasher/js-node/dropbox-content-hasher';
 // log.log = function(...args: any[]){
 
 // }
+function getHash(path: string) {
+    return new Promise((resolve, reject) => {
+        const hasher = DropboxContentHasher.create();
+        const f = fs.createReadStream(path);
+        f.on('data', function(buf) {
+            hasher.update(buf);
+        });
+        f.on('end', function(err) {
+            const hexDigest = hasher.digest('hex');
+            resolve(hexDigest);
+        });
+        f.on('error', function(err) {
+            reject("Error reading from file: " + err);
+        });
+    });
+}
 
 interface Config {
     token: string,
@@ -207,6 +225,7 @@ export default class DSnapshot {
         this.validateConfig();
         const job = this.job;
         return new Promise(async (resolve, reject) => {
+            let bytesDownloadedTotal = 0;
             const stats = new Stats();
             stats.onUpdate = (value) => {
                 const progress = value / job.bytesTotal;
@@ -225,7 +244,8 @@ export default class DSnapshot {
                             break;
                         case 'file':
                             if (fs.existsSync(localPath) && fs.statSync(localPath).size === entry.size) {
-                                log.verbose(entry.path_display+' Already resolved');
+                                log.verbose(entry.path_display + ' Already resolved');
+                                job.bytesProcessed += entry.size;
                                 break;
                             }
                             log.debug(`${entry.path_display} ${entry.size} ${entry.server_modified}`);
@@ -234,10 +254,29 @@ export default class DSnapshot {
                                 if (fs.existsSync(previousLocalPath)) {
                                     const stat = fs.statSync(previousLocalPath);
                                     log.debug(`${entry.path_display} ${previousLocalPath} ${stat.size} ${stat.mtime.toISOString()}`);
-                                    if (stat.size === entry.size && stat.mtime.toISOString() === entry.server_modified) {
-                                        log.verbose(`${entry.path_display} -> ${previousLocalPath}`);
-                                        fs.linkSync(previousLocalPath, localPath);
-                                        break;
+                                    if (stat.size === entry.size) {
+                                        if (stat.mtime.toISOString() === entry.server_modified) {
+                                            log.verbose(`${entry.path_display} -> ${previousLocalPath}`);
+                                            fs.link(previousLocalPath, localPath, () => { });
+                                            job.bytesProcessed += entry.size;
+                                            break;
+                                        } else {
+                                            log.debug(`${entry.path_display} Calculating content hash of existing file`);
+                                            const previousHash = await getHash(previousLocalPath);
+                                            if (previousHash === entry.content_hash) {
+                                                log.debug(`${entry.path_display} content hash match`);
+                                                log.verbose(`${entry.path_display} -> ${previousLocalPath}`);
+                                                fs.link(previousLocalPath, localPath, () => {
+                                                    const time = new Date(entry.server_modified);
+                                                    log.debug(`${entry.path_display} correct time: ${entry.server_modified}`);
+                                                    fs.utimes(localPath, time, time, () => { });
+                                                });
+                                                job.bytesProcessed += entry.size;
+                                                break;
+                                            } else {
+                                                log.debug(`${entry.path_display} content hash mismatch: ${previousHash} != ${entry.content_hash}`);
+                                            }
+                                        }
                                     }
                                 } else {
                                     log.debug(`${entry.path_display} Does not exist in previous snapshot.`);
@@ -282,6 +321,7 @@ export default class DSnapshot {
                                 });
                             }).then(bytes => {
                                 job.bytesProcessed += bytes;
+                                bytesDownloadedTotal += bytes;
                             }).catch(error => {
                                 job.bytesProcessed += entry.size;
                             });
@@ -304,6 +344,7 @@ export default class DSnapshot {
                 if (job.bytesProcessed >= job.bytesTotal){
                     job.completeFolder();
                 }
+                log.info(`Resolved ${prettyBytes(job.bytesProcessed)} (${prettyBytes(bytesDownloadedTotal)} downloaded) in ${stats.elapsed}`);
                 resolve();
             }
         });

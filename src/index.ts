@@ -284,7 +284,6 @@ export default class DSnapshot {
                             }
                             log.verbose(`${entry.path_display} Downloading ${prettyBytes(entry.size)}`);
                             const metadata = {
-                                localPath,
                                 server_modified: new Date(entry.server_modified),
                             }
                             await new Promise((resolveDownload: (value:number) => void, rejectDownload) => {
@@ -298,7 +297,8 @@ export default class DSnapshot {
                                 }, (response) => {
                                     if (response.statusCode === 200) {
                                         log.debug(`${entry.path_display} Receiving ...`);
-                                        const writeStream = fs.createWriteStream(metadata.localPath);
+                                        fs.mkdirSync(path.dirname(localPath), { recursive: true });
+                                        const writeStream = fs.createWriteStream(localPath);
                                         response.pipe(writeStream);
                                         response.on('data', data => {
                                             downloadedBytes += data.length;
@@ -306,7 +306,7 @@ export default class DSnapshot {
                                         });
                                         response.on('end', () => {
                                             log.debug(`${entry.path_display} received. Setting times.`);
-                                            fs.utimes(metadata.localPath, metadata.server_modified, metadata.server_modified, () => { });
+                                            fs.utimes(localPath, metadata.server_modified, metadata.server_modified, () => { });
                                             resolveDownload(downloadedBytes);
                                         });
                                     } else if (response.statusCode){

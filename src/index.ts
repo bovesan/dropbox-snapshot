@@ -8,7 +8,6 @@ import { getToken } from './authenticate';
 import environment from './config';
 import * as diskusage from 'diskusage';
 import prompt from './prompt';
-import bfj from 'bfj';
 import Job from './job';
 import https from 'https';
 import http from 'http';
@@ -178,47 +177,59 @@ export default class DSnapshot {
         this.validateConfig();
         const job = this.job;
         return new Promise(async (resolve, reject) => {
-            this.job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
-            let listFolderResult: Dropbox.files.ListFolderResult | undefined;
-            log.info(`Mapping remote (${prettyBytes(this.job.bytesTotal)})`)
-            while (!listFolderResult || listFolderResult.has_more) {
-                try {
-                    if (job.cursor) {
-                        listFolderResult = await this.dropbox.filesListFolderContinue({
-                            cursor: job.cursor,
-                        });
+            if (!job.mapComplete && fs.existsSync(job.mapPath)){
+                job.readMap(itemsParsed => {
+                    this.updateStatus('Reading map', 'progress', itemsParsed / job.mapLength);
+                }, () => {
+                    if (job.bytesIndexed !== job.bytesTotal){
+                        reject('Stored map does not match job.bytesTotal');
                     } else {
-                        listFolderResult = await this.dropbox.filesListFolder({
-                            path: this.remoteFolder || '',
-                            recursive: true,
-                        });
+                        resolve();
                     }
-                    job.cursor = listFolderResult!.cursor;
-                    listFolderResult.entries.forEach((entry: any) => {
-                        if (entry.size) {
-                            job.bytesIndexed += (entry as Dropbox.files.FileMetadataReference).size;
+                });
+            } else {
+                this.job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
+                let listFolderResult: Dropbox.files.ListFolderResult | undefined;
+                log.info(`Mapping remote (${prettyBytes(this.job.bytesTotal)})`)
+                while (!listFolderResult || listFolderResult.has_more) {
+                    try {
+                        if (job.cursor) {
+                            listFolderResult = await this.dropbox.filesListFolderContinue({
+                                cursor: job.cursor,
+                            });
+                        } else {
+                            listFolderResult = await this.dropbox.filesListFolder({
+                                path: this.remoteFolder || '',
+                                recursive: true,
+                            });
                         }
-                    });
-                    job.map.push(...listFolderResult.entries);
-                    this.updateStatus('Mapping remote', 'progress', job.bytesIndexed / job.bytesTotal);
-                    // const timeSpent = Date.now() - startTime;
-                    // const timeLeft = timeSpent * (1.0 - bytesIndexed / bytesUsed);
-                    // log('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30), true);
-                    // process.stdout.write('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30));
-                    // process.stdout.write(`\rGetting remote file info: ${prettyBytes(bytesIndexed)} / ${prettyBytes(bytesUsed)} ${((bytesIndexed / bytesUsed) * 100).toPrecision(3)}%. Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}     `);
-                } catch (error) {
-                    reject(error);
+                        job.cursor = listFolderResult!.cursor;
+                        listFolderResult.entries.forEach((entry: any) => {
+                            if (entry.size) {
+                                job.bytesIndexed += (entry as Dropbox.files.FileMetadataReference).size;
+                            }
+                        });
+                        job.map.push(...listFolderResult.entries);
+                        this.updateStatus('Mapping remote', 'progress', job.bytesIndexed / job.bytesTotal);
+                        // const timeSpent = Date.now() - startTime;
+                        // const timeLeft = timeSpent * (1.0 - bytesIndexed / bytesUsed);
+                        // log('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30), true);
+                        // process.stdout.write('\rMapping remote'.padEnd(21) + (`${((job.bytesIndexed / job.bytesTotal) * 100).toPrecision(3)}%`).padEnd(20) + `Memory usage ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(30));
+                        // process.stdout.write(`\rGetting remote file info: ${prettyBytes(bytesIndexed)} / ${prettyBytes(bytesUsed)} ${((bytesIndexed / bytesUsed) * 100).toPrecision(3)}%. Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}     `);
+                    } catch (error) {
+                        reject(error);
+                    }
+                    job.mapLength = job.map.length;
                 }
-                job.mapLength = job.map.length;
+                // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
+                // log('');
+                job.mapComplete = true;
+                fs.writeFileSync(job.jobPath, JSON.stringify(job, null, 2));
+                log.info(`Writing map to disk ...`)
+                await job.writeMap().catch(error => reject(error));
+                log.info('Wrote map: ' + job.mapPath);
+                resolve();
             }
-            // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
-            // log('');
-            job.mapComplete = true;
-            fs.writeFileSync(job.jobPath, JSON.stringify(job, null, 2));
-            log.info(`Writing map to disk ...`)
-            await bfj.write(job.mapPath, job.map).catch(error => reject(error));
-            log.info('Wrote map: ' + job.mapPath);
-            resolve();
         });
     }
     processMap() {
@@ -234,7 +245,7 @@ export default class DSnapshot {
                 status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(progress);
                 this.updateStatus('Resolving files', 'status', status);
             }
-            while (job.processIndex < job.mapLength) {
+            while (job.processIndex < job.map.length) {
                 const entry = job.map[job.processIndex];
                 if (entry.path_display && entry.path_lower) {
                     const localPath = path.join(job.folder, entry.path_display!);
@@ -335,8 +346,8 @@ export default class DSnapshot {
                 stats.log(job.bytesProcessed);
                 job.processIndex++;
             }
-            if (!this.job.mapComplete) {
-                log.debug('Local operations caught up with map, but map is not complete. Waiting 1 second.')
+            if (!job.mapComplete) {
+                log.debug(`mapComplete: ${job.mapComplete} bytesIndexed: ${job.bytesIndexed}/${job.bytesTotal} map.length: ${job.map.length} processIndex: ${job.processIndex} Waiting for map to catch up.`)
                 setTimeout(() => {
                     resolve(this.processMap());
                 }, 1000);

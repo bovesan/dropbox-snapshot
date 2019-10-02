@@ -6,9 +6,7 @@ export const namespaces = {
     debug:   'dsnapshot:debug',
 }
 
-console.log(process.env.DEBUG);
 Debug.enable(namespaces.info);
-console.log(process.env.DEBUG);
 
 Debug.log = (...args: any[]) => {
 	process.stderr.write("\033[2K" + args.join(' ')+'\n');

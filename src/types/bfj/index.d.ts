@@ -31,11 +31,6 @@ declare namespace bfj {
 		*/
 		ndjson?: boolean,
 		/**
-		For bfj.match only, set this to true if you wish to match against numbers
-		with a string or regular expression selector argument.
-		*/
-		numbers?: boolean,
-		/**
 		The length of the write buffer.
 		Smaller values use less memory but may result in a slower serialisation time.
 		The default value is 1024.
@@ -45,6 +40,18 @@ declare namespace bfj {
 		Set this if you would like to pass a value for the highWaterMark option to the readable stream constructor.
 		*/
 		highWaterMark?: number,
+	}
+	interface MatchOptions extends ParsingOptions {
+		/**
+		Set this to true if you wish to match against numbers
+		with a string or regular expression selector argument.
+		*/
+		numbers?: boolean,
+		/**
+		Only apply the selector to certain depths.
+		This can improve performance and memory usage, if you know that you're not interested in parsing top-level items.
+		*/
+		minDepth?: number,
 	}
 	interface SerialisationOptions {
 		/**
@@ -108,7 +115,7 @@ declare namespace bfj {
 		(key: string, value: any, depth: number): boolean,
 	}
 	function read(path: string, options?: SerialisationOptions): Promise<any>;
-	function match(stream: fs.ReadStream, selector?: string | RegExp | PredicateFunction , options?: SerialisationOptions): EventEmitter;
+	function match(stream: fs.ReadStream, selector?: string | RegExp | PredicateFunction, options?: MatchOptions): EventEmitter;
 	function walk(stream: fs.ReadStream, options?: SerialisationOptions): EventEmitter;
 	function write(path: string, object: any, options?: SerialisationOptions): Promise<void>;
 	function eventify(data: object, options?: SerialisationOptions): EventEmitter;

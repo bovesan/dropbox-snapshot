@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import bfj from 'bfj';
 import log from './log';
+import os from 'os';
 
 export default class Job {
     rootFolder: string;
@@ -110,10 +111,58 @@ export default class Job {
         this.bytesIndexed = 0;
         this.mapComplete = false;
         return new Promise((resolve, reject) => {
+            if (!fs.existsSync(this.mapPath)){
+                reject('Map does not exist: '+this.mapPath);
+            }
+            log.verbose('Copying map to tmp/ for reading, to avoid excessive seeking between map and resolve operations.');
+            const tmpFile = path.join(os.tmpdir(), 'dsnapshot', this.mapPath);
+            fs.mkdirSync(path.dirname(tmpFile), { recursive: true });
+            fs.copyFileSync(this.mapPath, tmpFile);
+            return bfj.read(this.mapPath).then(map => {
+                this.map = map;
+                this.bytesIndexed = this.bytesTotal;
+                this.mapComplete = true;
+            });
             let itemsParsed = 0;
-            const stream = fs.createReadStream(this.mapPath);
-            const match = bfj.match(stream, (key, value, depth) => depth === 0, {
+            const chunk_size = 10 * 1024 * 1024;
+            const buffer = Buffer.alloc(chunk_size);
+            const stream = fs.createReadStream(tmpFile, {
+                encoding: 'utf8',
+                // highWaterMark: chunk_size,
+            });
+            // fs.open(tmpFile, 'r', function(err, fd) {
+            //     if (err) throw err;
+            //     const leftovers = Buffer.alloc(chunk_size);
+            //     function readNextChunk() {
+            //         fs.read(fd, buffer, 0, chunk_size, null, function(err, nread) {
+            //             if (err) throw err;
+
+            //             if (nread === 0) {
+            //                 // done reading file, do any necessary finalization steps
+
+            //                 fs.close(fd, function(err) {
+            //                     if (err) throw err;
+            //                 });
+            //                 return;
+            //             }
+
+            //             var data;
+            //             if (nread < chunk_size)
+            //                 data = buffer.slice(0, nread);
+            //             else
+            //                 data = buffer;
+
+            //             // do something with `data`, then call `readNextChunk();`
+            //             readNextChunk();
+            //         });
+            //     }
+            //     readNextChunk();
+            // });
+            // stream.read()
+            const match = bfj.match(stream, (key, value, depth) => depth === 1, {
+                // highWaterMark: 1024 * 1024,
                 // bufferLength: 1024*1024,
+                minDepth: 1,
             });
             match.on('data', (entry: Dropbox.files.FileMetadataReference | Dropbox.files.FolderMetadataReference | Dropbox.files.DeletedMetadataReference) => {
                 if (entry['.tag'] === 'file') {
@@ -121,9 +170,13 @@ export default class Job {
                 }
                 this.map.push(entry);
                 itemsParsed++;
-                onProgress(itemsParsed);
+                if (itemsParsed % 1000 === 0) {
+                    onProgress(itemsParsed);
+                }
             });
             match.on('end', () => {
+                stream.close();
+                fs.unlinkSync(tmpFile);
                 this.mapLength = this.map.length;
                 this.mapComplete = true;
                 onEnd();

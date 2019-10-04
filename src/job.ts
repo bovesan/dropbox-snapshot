@@ -115,17 +115,13 @@ export default class Job {
             if (!fs.existsSync(this.mapPath)){
                 reject('Map does not exist: '+this.mapPath);
             }
-            log.verbose('Copying map to tmp/ for reading, to avoid excessive seeking between map and resolve operations.');
-            const tmpFile = path.join(os.tmpdir(), 'dsnapshot', this.mapPath);
-            fs.mkdirSync(path.dirname(tmpFile), { recursive: true });
-            fs.copyFileSync(this.mapPath, tmpFile);
-            return readArray(tmpFile, this.map, (bytesRead, itemsRead) => {
+            return readArray(this.mapPath, this.map, (bytesRead, itemsRead) => {
                 this.bytesIndexed = bytesRead;
                 onProgress(itemsRead);
             }).then(() => {
                 this.bytesIndexed = this.bytesTotal;
                 this.mapComplete = true;
-                fs.unlinkSync(tmpFile);
+                fs.unlinkSync(this.mapPath);
                 onEnd();
             });
         });

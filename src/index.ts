@@ -126,6 +126,10 @@ export default class DSnapshot {
         let errors: string[] = [];
         if (!this.config.localRoot) {
             errors.push('localRoot not set. Please run dsnapshot config localRoot <path>');
+        } else {
+            if (!fs.existsSync(this.config.localRoot)) {
+                errors.push('localRoot does not exist: ' + this.config.localRoot);
+            }
         }
         if (!this.config.token) {
             errors.push('No access token set. Please run dsnapshot authenticate or set token manually with dsnapshot config token <token>');

@@ -52,7 +52,7 @@ interface DataPoint {
 	time: number,
 	value: number,
 }
-export default class {
+export default class Stats {
 	minutes: DataPoint[] = [];
 	seconds: DataPoint[] = [];
 	starttime: number;

@@ -5,8 +5,9 @@ import { Status } from './index';
 import prettyBytes from 'pretty-bytes';
 import log from './log';
 import { etl } from './stats';
-
-// const log = Debug('cli');
+import services from './services';
+import { Source } from './sources';
+import prompts from 'prompts';
 
 function runPromiseAndExit(promise: Promise<any>) {
     let keepAlive = setInterval(() => {
@@ -21,7 +22,11 @@ function runPromiseAndExit(promise: Promise<any>) {
         clearInterval(keepAlive);
     });
 }
-
+async function asyncForEach(array: [], callback: (T) => void) {
+  for (let index = 0; index < array.length; index++) {
+    await callback(array[index]);
+  }
+}
 function monitor(status: Status){
     const line = '  ' + Object.entries(status).map(([key, value]) => {
         if (value.status) {
@@ -39,10 +44,9 @@ function monitor(status: Status){
 const program = new commander.Command();
 program
     .version('1.0.0')
-    .description("Downloads and creates local snapshots of a user's Dropbox account.")
+    .description("Downloads and creates local snapshots of cloud services.")
     .option('-c, --configPath <path>', 'Config file path.', environment.config_path)
     // .option('-l, --localRoot <path>', 'Local root folder.')
-    .option('-r, --remoteFolder <path>', 'Only process this remote folder')
     // .option('-r, --rotations', 'Maximum number of local snapshots before the oldest will be discarded.')
     .option('-v, --verbose', 'Verbose output.', ()=>log.enable('verbose'))
     .option('-d, --debug', 'Extra verbose output.', () => log.enable('verbose').enable('debug'))
@@ -75,12 +79,73 @@ program
         new DSnapshot(program as any, monitor).configure(key, newValue);
     });
 
-program
-    .command('add [alias]')
-    .option('-t, --type <type>', ['dropbox'].join(', '))
-    .description('Get or set a config value')
-    .action(function(command, alias) {
-        console.log({command, alias});
+const sourceCommand = program
+    .command('source [operation]')
+    .alias('sources')
+    .description('A source is an individual configurations of a service type. Has credentials and other options.')
+    .action(async (operation: string, command: commander.Command) => {
+        switch (operation) {
+            case 'add':
+                const source = await prompts([
+                    {
+                      type: 'select',
+                      name: 'service',
+                      message: 'Service type:',
+                      choices: [
+                        { title: 'Dropbox', value: 'dropbox' },
+                        { title: 'FTP', value: 'ftp', disabled: true },
+                        { title: 'HTTP', value: 'http', disabled: true },
+                        { title: 'IMAP', value: 'imap', disabled: true },
+                        { title: 'SSH', value: 'ssh', disabled: true },
+                      ],
+                      initial: 0,
+                    },
+                    // {
+                    //   type: 'text',
+                    //   name: 'alias',
+                    //   message: 'Alias:',
+                    //   initial: (prev, values, prompt) => values.service
+                    // },
+                ]).then(({service}) => {
+                    return new Source(service);
+                });
+                for (var i = 0; i < source.service.settings.length; ++i) {
+                    const setting = source.service.settings[i];
+                    if (setting.messages){
+                        console.log(setting.messages.join('\n'));
+                    }
+                    console.log(source.service[setting.key]);
+                    const question: prompts.PromptObject = {
+                        type: setting.type,
+                        name: setting.key,
+                        message: setting.title,
+                        initial: source.service[setting.key],
+                    };
+                    if (setting.required){
+                        question.validate = value => value ? true : 'This setting is required'
+                    }
+                    switch (setting.type) {
+                        case 'text':
+                            break;
+                        default:
+                            // code...
+                            break;
+                    }
+                    try {
+                        await prompts(question, {onCancel: ()=>{process.exit()}}).then(values => {
+                            source.service[setting.key] = values[setting.key];
+                            return Promise.all(source.service.promises);
+                        });
+                    } catch ({error}) {
+                        console.log(error);
+                        i--;
+                    }
+                }
+                break;
+            default:
+                console.log(command.description);
+                break;
+        }
     });
 
 program

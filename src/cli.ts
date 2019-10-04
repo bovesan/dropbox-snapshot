@@ -76,6 +76,14 @@ program
     });
 
 program
+    .command('add [alias]')
+    .option('-t, --type <type>', ['dropbox'].join(', '))
+    .description('Get or set a config value')
+    .action(function(command, alias) {
+        console.log({command, alias});
+    });
+
+program
     .command('snapshot')
     .description('Create a new snapshot and download updated files.')
     .action(function(cmd, options) {

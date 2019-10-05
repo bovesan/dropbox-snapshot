@@ -1,5 +1,5 @@
 import commander from 'commander';
-import environment from './config';
+import config from './config';
 import DSnapshot from './index';
 import { Status } from './index';
 import prettyBytes from 'pretty-bytes';
@@ -44,16 +44,27 @@ const program = new commander.Command();
 program
     .version('1.0.0')
     .description("Downloads and creates local snapshots of cloud services.")
-    .option('-c, --configPath <path>', 'Config file path.', environment.config_path)
-    .option('-v, --verbose', 'Verbose output.', ()=>log.enable('verbose'))
-    .option('-d, --debug', 'Extra verbose output.', () => log.enable('verbose').enable('debug'))
+    // .option('-c, --configFolder <path>', 'config folder', config.folder)
+    .option('-v, --verbose', 'verbose output', ()=>log.enable('verbose'))
+    .option('-d, --debug', 'extra verbose output', () => log.enable('verbose').enable('debug'))
 
 
 program
-    .command('config')
+    .command('config [key] [value]')
     .description('Global configuration.')
-    .action(async function(key, newValue) {
-        throw Error('Not yet implemented');
+    .action(async function(key, value) {
+        if (key){
+            if (value !== undefined){
+                config[key] = value;
+                console.log(key+': '+config[key]);
+            } else {
+                console.log(key+': '+config[key]);
+            }
+        } else {
+            Object.entries(config).forEach(([k, v]) => {
+                console.log((k.replace(/^_/g, '')+': ').padEnd(16)+v);
+            });
+        }
     });
 
 program
@@ -101,7 +112,16 @@ program
             }
             try {
                 if (setting.before){
-                    setting.before();
+                    setting.before().then((response) => {
+                        for (var i = 0; i < response.length; ++i) {
+                            process.stdin.emit('keypress', response[i], {
+                                name: response[i],
+                            });
+                        }
+                        process.stdin.emit('keypress', response[i], {
+                            name: 'return',
+                        });
+                    });
                 }
                 await prompts(question, {onCancel: ()=>{process.exit()}}).then(values => {
                     source[setting.key] = values[setting.key];
@@ -112,6 +132,7 @@ program
                 i--;
             }
         }
+        source.write();
     });
 
 program

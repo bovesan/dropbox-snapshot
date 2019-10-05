@@ -4,8 +4,9 @@ import os from 'os';
 import Dropbox from 'dropbox';
 import prettyBytes from 'pretty-bytes';
 import fetch from 'isomorphic-fetch';
-import { getToken } from './sources/dropbox/authenticate';
-import environment from './config';
+//@ts-ignore
+import { getToken } from './authenticate';
+import config from './config';
 import * as diskusage from 'diskusage';
 import prompt from './prompt';
 import Job from './job';
@@ -74,7 +75,7 @@ export default class DSnapshot {
         } else {
             this.config = {} as Config;
         }
-        this.dropbox = new Dropbox.Dropbox({ clientId: environment.clientId, fetch });
+        // this.dropbox = new Dropbox.Dropbox({ clientId: config.clientId, fetch });
     }
     get job() {
         if (!this._job) {

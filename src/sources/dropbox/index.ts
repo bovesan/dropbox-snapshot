@@ -2,42 +2,15 @@ import Source from '../_source';
 import Dropbox from 'dropbox';
 import fetch from 'isomorphic-fetch';
 import log from '../../log';
-import http from 'http';
-import authenticationPage from './authenticationPage';
 import readline from 'readline';
+import { listenForToken } from '../../auth'
+import config from '../../config'
 
 const CLIENT_ID = 'irvv6l188sxowqo';
-const REDIRECT_PORT = 18881;
-
-function listenForToken(){
-	return new Promise((resolve, reject) => {
-		const server = http.createServer((req, res) => {
-		    const match = req.url!.match(/access_token=([^&]*)/);
-		    if (!match) {
-		        res.write(authenticationPage);
-		        res.end();
-		    } else {
-		    	const token = match[1];
-		        res.end();
-		        server.close();
-		        for (var i = 0; i < token.length; ++i) {
-		        	process.stdin.emit('keypress', token[i], {
-		        		name: token[i],
-		        	});
-		        }
-	        	process.stdin.emit('keypress', token[i], {
-	        		name: 'return',
-	        	});
-		        res.write('You can now close this window.');
-		        resolve();
-		    }
-		}).listen(REDIRECT_PORT);
-	});
-}
 
 export default class DropboxSource extends Source {
     dropbox: DropboxTypes.Dropbox;
-	tag = 'dropbox';
+	type = 'dropbox';
 	user?: Dropbox.users.FullAccount;
 	get settings() {
 		return [
@@ -45,7 +18,7 @@ export default class DropboxSource extends Source {
 				before: listenForToken,
 				messages: [
 					'Please visit this address to authenticate: ',
-					this.dropbox.getAuthenticationUrl(`http://localhost:${REDIRECT_PORT}/`),
+					this.dropbox.getAuthenticationUrl(`http://localhost:${config.listenPort}/`),
 				],
 				key: 'token',
 				title: 'Access token',
@@ -82,11 +55,11 @@ export default class DropboxSource extends Source {
 		this.promises.push(this.dropbox.usersGetCurrentAccount().then(user => {
 			this.user = user;
 			log.info('Authenticated as '+user.name.display_name);
-			this.alias = `Dropbox - ${user.name.display_name}`;
-			if (!this.alias){
+			if (!this._alias){
 				this.alias = `Dropbox - ${user.name.display_name}`;
 			}
 		}));
+		this.write();
 	}
 	_remoteFolder = '';
 	get remoteFolder(){
@@ -94,18 +67,14 @@ export default class DropboxSource extends Source {
 	}
 	set remoteFolder(value: string){
 		this._remoteFolder = value;
+		this.write();
 	}
-	alias?: string;
-	// _alias = '';
-	// get alias(){
-	// 	return (this._alias);
-	// }
-	// set alias(value: string){
-	// 	this._alias = value;
-	// }
 	constructor(){
 		super();
         this.dropbox = new Dropbox.Dropbox({ clientId: CLIENT_ID, fetch });
+        if (this.token){
+			this.dropbox.setAccessToken(this.token);
+        }
 		// throw Error('Not yet implemented');
 	}
 }

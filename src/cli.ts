@@ -45,112 +45,101 @@ program
     .version('1.0.0')
     .description("Downloads and creates local snapshots of cloud services.")
     .option('-c, --configPath <path>', 'Config file path.', environment.config_path)
-    // .option('-l, --localRoot <path>', 'Local root folder.')
-    // .option('-r, --rotations', 'Maximum number of local snapshots before the oldest will be discarded.')
     .option('-v, --verbose', 'Verbose output.', ()=>log.enable('verbose'))
     .option('-d, --debug', 'Extra verbose output.', () => log.enable('verbose').enable('debug'))
-    // .option('-n, --do-nothing', 'Do not write anything to disk. Only show what would be done.')
-    // .option('-o, --own', 'Only download files owned by current Dropbox user.')
-    // .option('-a, --all', 'Download all files in shared resources (opposite of -o).')
-    // .arguments('[remoteFolder...]');
+
 
 program
-    .on
-
-program
-    .command('authenticate')
-    .description('Authenticate dropbox user.')
-    .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(program as any, monitor).authenticate());
+    .command('config')
+    .description('Global configuration.')
+    .action(async function(key, newValue) {
+        throw Error('Not yet implemented');
     });
 
 program
-    .command('info')
-    .description('Show remote and local information.')
-    .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(program as any, monitor).info());
-    });
-
-program
-    .command('config <key> [newValue]')
-    .description('Get or set a config value')
-    .action(function(key, newValue) {
-        new DSnapshot(program as any, monitor).configure(key, newValue);
-    });
-
-const sourceCommand = program
-    .command('source [operation]')
-    .alias('sources')
-    .description('A source is an individual configurations of a service type. Has credentials and other options.')
-    .action(async (operation: string, command: commander.Command) => {
-        switch (operation) {
-            case 'add':
-                const source = await prompts([
-                    {
-                      type: 'select',
-                      name: 'service',
-                      message: 'Service type:',
-                      choices: [
-                        { title: 'Dropbox', value: 'dropbox' },
-                        { title: 'FTP', value: 'ftp', disabled: true },
-                        { title: 'HTTP', value: 'http', disabled: true },
-                        { title: 'IMAP', value: 'imap', disabled: true },
-                        { title: 'SSH', value: 'ssh', disabled: true },
-                      ],
-                      initial: 0,
-                    },
-                    // {
-                    //   type: 'text',
-                    //   name: 'alias',
-                    //   message: 'Alias:',
-                    //   initial: (prev, values, prompt) => values.service
-                    // },
-                ]).then(({service}) => {
-                    return Sources(service);
-                });
-                for (var i = 0; i < source.settings.length; ++i) {
-                    const setting = source.settings[i];
-                    if (setting.messages){
-                        console.log(setting.messages.join('\n'));
-                    }
-                    const question: prompts.PromptObject = {
-                        type: setting.type,
-                        name: setting.key,
-                        message: setting.title,
-                        initial: source[setting.key],
-                    };
-                    if (setting.required){
-                        question.validate = value => value ? true : 'This setting is required'
-                    }
-                    switch (setting.type) {
-                        case 'text':
-                            break;
-                        default:
-                            // code...
-                            break;
-                    }
-                    try {
-                        await prompts(question, {onCancel: ()=>{process.exit()}}).then(values => {
-                            source[setting.key] = values[setting.key];
-                            return Promise.all(source.promises);
-                        });
-                    } catch ({error}) {
-                        console.log(error);
-                        i--;
-                    }
+    .command('add')
+    .description('Add a source.')
+    .action(async (command: commander.Command) => {
+        const source = await prompts([
+            {
+              type: 'select',
+              name: 'service',
+              message: 'Service type:',
+              choices: [
+                { title: 'Dropbox', value: 'dropbox' },
+                { title: 'FTP', value: 'ftp', disabled: true },
+                { title: 'Google Drive', value: 'googledrive', disabled: true },
+                { title: 'HTTP', value: 'http', disabled: true },
+                { title: 'IMAP', value: 'imap', disabled: true },
+                { title: 'SSH', value: 'ssh', disabled: true },
+              ],
+              initial: 0,
+            },
+        ]).then(({service}) => {
+            return Sources(service);
+        });
+        for (var i = 0; i < source.settings.length; ++i) {
+            const setting = source.settings[i];
+            if (setting.messages){
+                console.log(setting.messages.join('\n'));
+            }
+            const question: prompts.PromptObject = {
+                type: setting.type,
+                name: setting.key,
+                message: setting.title,
+                initial: source[setting.key],
+            };
+            if (setting.required){
+                question.validate = value => value ? true : 'This setting is required'
+            }
+            switch (setting.type) {
+                case 'text':
+                    break;
+                default:
+                    // code...
+                    break;
+            }
+            try {
+                if (setting.before){
+                    setting.before();
                 }
-                break;
-            default:
-                console.log(command.description);
-                break;
+                await prompts(question, {onCancel: ()=>{process.exit()}}).then(values => {
+                    source[setting.key] = values[setting.key];
+                    return Promise.all(source.promises);
+                });
+            } catch ({error}) {
+                console.log(error);
+                i--;
+            }
         }
     });
 
 program
-    .command('snapshot')
-    .description('Create a new snapshot and download updated files.')
-    .action(function(cmd, options) {
-        runPromiseAndExit(new DSnapshot(program as any, monitor).snapshot());
+    .command('list')
+    .description('List all configured sources.')
+    .action(async function(key, newValue) {
+        throw Error('Not yet implemented');
+    });
+
+program
+    .command('map [source]')
+    .description('Create an updated index.')
+    .action(async function(key, newValue) {
+        throw Error('Not yet implemented');
+    });
+
+program
+    .command('resolve [source]')
+    .description('Update files according to the latest map and download resources as necessary.')
+    .action(async function(key, newValue) {
+        throw Error('Not yet implemented');
+    });
+
+program
+    .command('pull [source]')
+    .description('Map and resolve.')
+    .action(async function(key, newValue) {
+        throw Error('Not yet implemented');
     });
 
 program.parse(process.argv);

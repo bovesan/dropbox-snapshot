@@ -1,9 +1,39 @@
 import Source from '../_source';
 import Dropbox from 'dropbox';
+import fetch from 'isomorphic-fetch';
 import log from '../../log';
+import http from 'http';
+import authenticationPage from './authenticationPage';
+import readline from 'readline';
 
 const CLIENT_ID = 'irvv6l188sxowqo';
 const REDIRECT_PORT = 18881;
+
+function listenForToken(){
+	return new Promise((resolve, reject) => {
+		const server = http.createServer((req, res) => {
+		    const match = req.url!.match(/access_token=([^&]*)/);
+		    if (!match) {
+		        res.write(authenticationPage);
+		        res.end();
+		    } else {
+		    	const token = match[1];
+		        res.end();
+		        server.close();
+		        for (var i = 0; i < token.length; ++i) {
+		        	process.stdin.emit('keypress', token[i], {
+		        		name: token[i],
+		        	});
+		        }
+	        	process.stdin.emit('keypress', token[i], {
+	        		name: 'return',
+	        	});
+		        res.write('You can now close this window.');
+		        resolve();
+		    }
+		}).listen(REDIRECT_PORT);
+	});
+}
 
 export default class DropboxSource extends Source {
     dropbox: DropboxTypes.Dropbox;
@@ -12,6 +42,7 @@ export default class DropboxSource extends Source {
 	get settings() {
 		return [
 			{
+				before: listenForToken,
 				messages: [
 					'Please visit this address to authenticate: ',
 					this.dropbox.getAuthenticationUrl(`http://localhost:${REDIRECT_PORT}/`),

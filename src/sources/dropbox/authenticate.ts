@@ -3,10 +3,10 @@ import Dropbox from 'dropbox';
 // import fs from 'fs';
 import http from 'http';
 import path from 'path';
-import config from './config';
+import config from '../../config';
 import authenticationPage from './authenticationPage';
-import prompt from './prompt';
-import log from './log';
+import prompt from '../../prompt';
+import log from '../../log';
 
 export function getToken(dropbox: Dropbox.Dropbox): Promise<string> {
     return new Promise((resolve, reject) => {

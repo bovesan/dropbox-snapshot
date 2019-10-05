@@ -4,7 +4,7 @@ import os from 'os';
 import Dropbox from 'dropbox';
 import prettyBytes from 'pretty-bytes';
 import fetch from 'isomorphic-fetch';
-import { getToken } from './authenticate';
+import { getToken } from './sources/dropbox/authenticate';
 import environment from './config';
 import * as diskusage from 'diskusage';
 import prompt from './prompt';

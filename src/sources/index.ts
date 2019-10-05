@@ -1,11 +1,11 @@
-import _Service from './_service';
+import _Source from './_source';
 import _Dropbox from './dropbox';
 
-declare namespace Services {
-	export type Service = _Service;
+declare namespace Sources {
+	export type Source = _Source;
 	export type Dropbox = _Dropbox;
 }
-function Services(tag: string): Services.Service {
+function Sources(tag: string): Sources.Source {
 	switch (tag) {
 		case 'dropbox':
 			return new _Dropbox();
@@ -16,4 +16,4 @@ function Services(tag: string): Services.Service {
 			break;
 	}
 }
-export = Services;
+export = Sources;

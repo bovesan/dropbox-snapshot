@@ -5,8 +5,7 @@ import { Status } from './index';
 import prettyBytes from 'pretty-bytes';
 import log from './log';
 import { etl } from './stats';
-import services from './services';
-import { Source } from './sources';
+import Sources from './sources';
 import prompts from 'prompts';
 
 function runPromiseAndExit(promise: Promise<any>) {
@@ -107,19 +106,18 @@ const sourceCommand = program
                     //   initial: (prev, values, prompt) => values.service
                     // },
                 ]).then(({service}) => {
-                    return new Source(service);
+                    return Sources(service);
                 });
-                for (var i = 0; i < source.service.settings.length; ++i) {
-                    const setting = source.service.settings[i];
+                for (var i = 0; i < source.settings.length; ++i) {
+                    const setting = source.settings[i];
                     if (setting.messages){
                         console.log(setting.messages.join('\n'));
                     }
-                    console.log(source.service[setting.key]);
                     const question: prompts.PromptObject = {
                         type: setting.type,
                         name: setting.key,
                         message: setting.title,
-                        initial: source.service[setting.key],
+                        initial: source[setting.key],
                     };
                     if (setting.required){
                         question.validate = value => value ? true : 'This setting is required'
@@ -133,8 +131,8 @@ const sourceCommand = program
                     }
                     try {
                         await prompts(question, {onCancel: ()=>{process.exit()}}).then(values => {
-                            source.service[setting.key] = values[setting.key];
-                            return Promise.all(source.service.promises);
+                            source[setting.key] = values[setting.key];
+                            return Promise.all(source.promises);
                         });
                     } catch ({error}) {
                         console.log(error);

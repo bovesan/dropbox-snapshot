@@ -1,11 +1,11 @@
-import Service from '../_service';
+import Source from '../_source';
 import Dropbox from 'dropbox';
 import log from '../../log';
 
 const CLIENT_ID = 'irvv6l188sxowqo';
 const REDIRECT_PORT = 18881;
 
-export default class DropboxService extends Service {
+export default class DropboxSource extends Source {
     dropbox: DropboxTypes.Dropbox;
 	tag = 'dropbox';
 	user?: Dropbox.users.FullAccount;

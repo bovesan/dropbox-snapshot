@@ -3,6 +3,7 @@ import config from '../../config';
 import path from 'path';
 import fs from 'fs';
 import uuid from 'uuid/v1';
+import Stats from '../../Stats';
 
 interface Setting {
 	before?: ()=>Promise<any>,
@@ -77,17 +78,17 @@ export default class Source {
 			throw Error('Unknown source: '+this.alias);
 		}
 	}
-	map(onUpdate: any): Promise<any> {
+	map(onUpdate: (stats: Stats[]) =>void): Promise<any> {
 		return new Promise((resolve, reject) => {
         	reject(`Not yet implemented: ${this.type}.map()`);
 		});
 	}
-	resolve(onUpdate: any): Promise<any> {
+	resolve(onUpdate: (stats: Stats[]) =>void): Promise<any> {
 		return new Promise((resolve, reject) => {
         	reject(`Not yet implemented: ${this.type}.resolve()`);
 		});
 	}
-	pull(onUpdate: any): Promise<any> {
+	pull(onUpdate: (stats: Stats[]) =>void): Promise<any> {
 		return new Promise(async (resolve, reject) => {
 			try {
 				await this.map(onUpdate).catch(reason => reject(reason));

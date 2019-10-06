@@ -1,4 +1,5 @@
 import log from './log';
+import prettyBytes from 'pretty-bytes';
 
 export function humanDuration(milliseconds: number){
 	const units = [
@@ -55,15 +56,22 @@ interface DataPoint {
 	value: number,
 }
 export default class Stats {
+	title: string;
 	minutes: DataPoint[] = [];
 	seconds: DataPoint[] = [];
 	starttime: number;
+	target?: number;
+	isBytes: boolean = false;
 	onUpdate?: (value: number) => void;
-	constructor(){
+	constructor(title: string, isBytes?: boolean){
 		const now: DataPoint = {
 			time: Date.now(),
 			value: 0,
 		}
+		if (isBytes){
+			this.isBytes = true;
+		}
+		this.title = title;
 		this.starttime = now.time;
 		this.minutes.push(now);
 		this.seconds.push(now);
@@ -94,11 +102,26 @@ export default class Stats {
 		const timespan = this.seconds[0].time - this.seconds[this.seconds.length - 1].time;
 		return delta * (60000.0 / timespan) || 0;
 	}
-	etl(progress: number) {
-		return etl(this.starttime, this.seconds[0].time, progress);
+	etl() {
+		return etl(this.starttime, this.seconds[0].time, this.progress);
 	}
 	get elapsed() {
 		return humanDuration(this.seconds[0].time - this.starttime);
+	}
+	get progress() {
+		if (!this.target){
+			return 0;
+		}
+		return this.value / this.target;
+	}
+	speed(){
+        return prettyBytes(Math.floor(this.lastMinute / 60)) + 'ps';
+	}
+	get value(){
+		return this.seconds[0].value;
+	}
+	get valueInHuman(){
+		return prettyBytes(this.value);
 	}
 
 }

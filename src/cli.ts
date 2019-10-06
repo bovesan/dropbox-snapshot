@@ -2,6 +2,7 @@ import commander from 'commander';
 import config from './config';
 import DSnapshot from './index';
 import Status from './Status';
+import Stats from './Stats';
 import prettyBytes from 'pretty-bytes';
 import log from './log';
 import { etl } from './stats';
@@ -40,16 +41,36 @@ function sourceIds(sourceId: string | number){
     }
     return sourceIds;
 }
-function monitor(status: Status){
-    const line = "\033[2K" + '  ' + Object.entries(status).map(([key, value]) => {
-        if (value.status) {
-            return key + ': '+(value.status).padEnd(50);
+function monitor(stats: Stats[]){
+    if (!Array.isArray(stats)){
+        stats = [stats];
+    }
+    let line = "\033[2K  ";
+    const fields: string[] = [];
+    stats.forEach(stat => {
+        let field = '';
+        field += stat.title + ':';
+        if (stat.target){
+            field += ' '+(stat.progress * 100).toPrecision(3) + '%';
+        } else {
+            if (stat.isBytes){
+                field += ' '+stat.valueInHuman;
+            } else {
+                field += ' '+stat.value;
+            }
         }
-        if (value.progress) {
-            const etlString = value.progress < 1 ? ' ETL: ' + etl(value.starttime, value.updatetime, value.progress) : ''
-            return key + ': ' + ((value.progress * 100).toPrecision(3) + '%').padEnd(10) + etlString.padEnd(25);
+        if (stat.value){
+            if (stat.isBytes){
+                field += ' @ '+stat.speed();
+            }
+            if (stat.target && stat.target > stat.value){
+                field += ' ETL: '+stat.etl();
+            }
         }
-    }).join('') + (`Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20)) + '\r';
+        fields.push(field);
+    });
+    fields.push((`Memory usage: ${prettyBytes(process.memoryUsage().heapUsed)}`.padEnd(20)))
+    line += fields.join('    ') + '\r';
     process.env.linebuffer = line;
     process.stdout.write(line)
 }
@@ -212,7 +233,7 @@ program
     });
 
 program
-    .command('*')
+    .command('*', {noHelp: true})
     .action(async function(commandName) {
         console.log(colors.red('Unknown command: '+commandName));
         program.outputHelp();

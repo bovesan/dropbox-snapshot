@@ -104,7 +104,7 @@ export default class DropboxSource extends Source {
 		});
 		return filtered;
 	}
-	map(onUpdate: any){
+	map(onUpdate: (stats: Stats[]) =>void){
 		return new Promise(async (resolve, reject) => {
 			const job: {
 				cursor?: string,
@@ -125,22 +125,23 @@ export default class DropboxSource extends Source {
 				map: [],
 			};
 			const status: any = {};
-            const stats = new Stats();
+            const stats = new Stats('Mapping remote', true);
             stats.onUpdate = (value) => {
-                status.progress = value / job.bytesTotal;
-                // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
-                status.status = (status.progress * 100).toPrecision(3) + '%';
-                status.status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(status.progress);
-                onUpdate({'Mapping': status});
+                // status.progress = value / job.bytesTotal;
+                // // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
+                // status.status = (status.progress * 100).toPrecision(3) + '%';
+                // status.status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(status.progress);
+                onUpdate([stats]);
             }
 	        job.startTime = Date.now();
-	        job.timestamp = new Date(job.startTime).toISOString().replace('T', ' ').slice(0, 16);
+	        job.timestamp = new Date(job.startTime).toISOString().replace('T', ' ').slice(0, 16).replace(':', '-');
 	        try {
 	        	job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
 	        } catch ({error}) {
 	        	log.error(error);
 	        	return reject(error);
 	        }
+            stats.target = job.bytesTotal;
         	job.path = path.join(this.destination, job.timestamp + '.job');
         	job.mapPath = path.join(this.destination, job.timestamp + '.map');
         	let entrySize = 0;
@@ -167,7 +168,7 @@ export default class DropboxSource extends Source {
                     });
                     job.map.push(...listFolderResult.entries);
                     if (!entrySize){
-                    	entrySize = (JSON.stringify(job.map.find(entry => entry['.tag'] == 'file')) || {}).length;
+                    	entrySize = (JSON.stringify(job.map.find(entry => entry['.tag'] == 'file')) || {length:0}).length;
                     }
                     if (job.map.length * entrySize > BUFFER_SIZE){
                     	log.debug('Buffer > '+prettyBytes(BUFFER_SIZE)+' saving to disk: '+job.mapPath);

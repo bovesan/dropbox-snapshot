@@ -242,14 +242,14 @@ export default class DSnapshot {
         const job = this.job;
         return new Promise(async (resolve, reject) => {
             let bytesDownloadedTotal = 0;
-            const stats = new Stats();
-            stats.onUpdate = (value) => {
-                const progress = value / job.bytesTotal;
-                // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
-                let status = (progress * 100).toPrecision(3) + '%';
-                status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(progress);
-                this.updateStatus('Resolving files', 'status', status);
-            }
+            const stats = new Stats('Resolving files');
+            // stats.onUpdate = (value) => {
+            //     const progress = value / job.bytesTotal;
+            //     // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
+            //     let status = (progress * 100).toPrecision(3) + '%';
+            //     status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl();
+            //     this.updateStatus('Resolving files', 'status', status);
+            // }
             while (job.processIndex < job.map.length) {
                 const entry = job.map[job.processIndex];
                 if (entry.path_display && entry.path_lower) {

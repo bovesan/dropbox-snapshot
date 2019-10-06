@@ -3,6 +3,7 @@ import _Dropbox from './dropbox';
 import path from 'path';
 import fs from 'fs';
 import config from '../config';
+import log from '../log';
 
 declare namespace Sources {
 	export type Source = _Source;
@@ -30,9 +31,10 @@ const Sources = {
 			basename = id+'.json';
 		}
 		const entry = JSON.parse(fs.readFileSync(path.join(config.sourcesFolder, basename), {encoding: 'utf8'}));
+		log.debug(entry._alias);
 		switch (entry.type) {
 			case 'dropbox':
-				return new _Dropbox(entry.alias);
+				return new _Dropbox(entry._alias);
 				break;
 			
 			default:

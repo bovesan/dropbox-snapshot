@@ -1,5 +1,7 @@
 import fs from 'fs';
 
+const BUFFER_SIZE = 10 * 1024 * 1024;
+
 export function readArray(path: string, array: any[], onChunk: (bytesRead: number, entriesRead: number) => void) {
 	return new Promise((resolve, reject) => {
 		array.length = 0;
@@ -40,4 +42,25 @@ export function readArray(path: string, array: any[], onChunk: (bytesRead: numbe
 			resolve();
 		});
 });
+}
+
+export function writeArray(path: string, array: any[]){
+	let buffer = '';
+	const stream = fs.createWriteStream(path, {
+		encoding: 'utf8',
+		highWaterMark: BUFFER_SIZE,
+	});
+	stream.write('[\n');
+	for (let i; i < array.length; i++){
+		buffer += JSON.stringify(array[i]);
+		if (i < array.length-1){
+			buffer += ',';
+		}
+		if (buffer.length > BUFFER_SIZE){
+			stream.write(buffer+'\n');
+			buffer = '';
+		}
+	}
+	stream.write(']');
+	stream.close();
 }

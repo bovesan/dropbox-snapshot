@@ -1,13 +1,15 @@
 import commander from 'commander';
 import config from './config';
 import DSnapshot from './index';
-import { Status } from './index';
+import Status from './Status';
 import prettyBytes from 'pretty-bytes';
 import log from './log';
 import { etl } from './stats';
 import Sources from './sources';
 import prompts from 'prompts';
 import colors from 'colors';
+import path from 'path';
+import fs from 'fs';
 
 function runPromiseAndExit(promise: Promise<any>) {
     let keepAlive = setInterval(() => {
@@ -32,12 +34,14 @@ function sourceIds(sourceId: string | number){
         }
         sourceIds.push(sourceId);
     } else {
+        log.debug('sourceId not specified. Getting all entries.')
         sourceIds = Sources.entries().map(entry => entry.alias);
+        log.debug('sourceIds: '+sourceIds.length);
     }
     return sourceIds;
 }
 function monitor(status: Status){
-    const line = '  ' + Object.entries(status).map(([key, value]) => {
+    const line = "\033[2K" + '  ' + Object.entries(status).map(([key, value]) => {
         if (value.status) {
             return key + ': '+(value.status).padEnd(50);
         }
@@ -104,8 +108,17 @@ program
             if (setting.messages){
                 console.log(setting.messages.join('\n'));
             }
+            let type: prompts.PromptType;
+            switch (setting.type) {
+                case 'string':
+                    type = 'text';
+                    break;
+                case 'path':
+                    type = 'text';
+                    break;
+            }
             const question: prompts.PromptObject = {
-                type: setting.type,
+                type,
                 name: setting.key,
                 message: setting.title,
                 initial: source[setting.key],
@@ -113,13 +126,23 @@ program
             if (setting.required){
                 question.validate = value => value ? true : 'This setting is required'
             }
-            switch (setting.type) {
-                case 'text':
-                    break;
-                default:
-                    // code...
-                    break;
-            }
+            // switch (setting.type) {
+            //     case 'path':
+            //         // question.choices = [];
+            //         question.suggest = (input) => {
+            //             let absPath = path.resolve(input);
+            //             let choices;
+            //             if (absPath.endsWith('/')){
+            //                 choices = fs.readdirSync(absPath);
+            //             } else {
+            //                 choices = fs.readdirSync(path.dirname(absPath));
+            //             }
+            //             return choices.filter(basename => basename.startsWith(path.basename(absPath)));
+            //             Promise.resolve(choices.filter(basename => basename.startsWith(path.basename(absPath))))
+            //             // Promise.resolve(choices.filter(item => item.slice(0, input.length) === input))
+            //         }
+            //         break;
+            // }
             try {
                 if (setting.before){
                     setting.before().then((response) => {
@@ -159,7 +182,8 @@ program
     .description('create an updated index')
     .action(async function(sourceId?: string | number) {
         sourceIds(sourceId).forEach(sourceId => {
-            return Sources.load(sourceId).map().catch(error => {
+            log.debug('sourceId: '+sourceId);
+            return Sources.load(sourceId).map(monitor).catch(error => {
                 console.log(colors.red(error));
             });
         });
@@ -170,7 +194,7 @@ program
     .description('update files according to the latest map and download resources as necessary')
     .action(async function(sourceId?: string | number) {
         sourceIds(sourceId).forEach(sourceId => {
-            return Sources.load(sourceId).resolve().catch(error => {
+            return Sources.load(sourceId).resolve(monitor).catch(error => {
                 console.log(colors.red(error));
             });
         });
@@ -181,7 +205,7 @@ program
     .description('map and resolve')
     .action(async function(sourceId?: string | number) {
         sourceIds(sourceId).forEach(sourceId => {
-            return Sources.load(sourceId).pull().catch(error => {
+            return Sources.load(sourceId).pull(monitor).catch(error => {
                 console.log(colors.red(error));
             });
         });

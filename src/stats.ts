@@ -1,3 +1,5 @@
+import log from './log';
+
 export function humanDuration(milliseconds: number){
 	const units = [
 		{
@@ -88,9 +90,9 @@ export default class Stats {
 		}
 	}
 	get lastMinute(){
-		const value = this.seconds[0].value - this.seconds[this.seconds.length - 1].value;
+		const delta = this.seconds[0].value - this.seconds[this.seconds.length - 1].value;
 		const timespan = this.seconds[0].time - this.seconds[this.seconds.length - 1].time;
-		return value * (60000.0 / timespan) | 0;
+		return delta * (60000.0 / timespan) || 0;
 	}
 	etl(progress: number) {
 		return etl(this.starttime, this.seconds[0].time, progress);

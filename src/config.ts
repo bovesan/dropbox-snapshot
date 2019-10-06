@@ -33,7 +33,7 @@ class Config {
 	// }
 	_defaultDestination: string | null = null;
 	get defaultDestination(){
-		return this._defaultDestination;
+		return this._defaultDestination || path.resolve('.')
 	}
 	set defaultDestination(value: any){
 		this._defaultDestination = value;

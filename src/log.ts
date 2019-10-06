@@ -1,9 +1,10 @@
 import Debug from 'debug';
 
 export const namespaces = {
-	info:    'dsnapshot:info',
-	verbose: 'dsnapshot:verbose',
-    debug:   'dsnapshot:debug',
+	error:   'raindance:error',
+	info:    'raindance:info',
+	verbose: 'raindance:verbose',
+    debug:   'raindance:debug',
 }
 
 Debug.enable(namespaces.info);
@@ -16,6 +17,7 @@ Debug.log = (...args: any[]) => {
 }
 
 export default {
+	error: Debug(namespaces.info),
 	info: Debug(namespaces.info),
 	verbose: Debug(namespaces.verbose),
 	debug: Debug(namespaces.debug),

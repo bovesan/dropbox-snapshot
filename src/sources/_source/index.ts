@@ -8,15 +8,15 @@ interface Setting {
 	before?: ()=>Promise<any>,
 	key: string,
 	title: string,
-	type: 'text',
+	type: 'string' | 'path',
 	required?: boolean,
 	messages?: string[],
 	after?: ()=>Promise<any>,
 }
 export default class Source {
 	type = '_source';
-	_alias?: string;
 	uuid: string;
+	_alias?: string;
 	get alias(){
 		return this._alias || this.type + '_' + this.uuid;
 	}
@@ -25,6 +25,17 @@ export default class Source {
 			fs.unlinkSync(this.configPath);
 		}
 		this._alias = value;
+		this.write();
+	}
+	_destination: string;
+	get destination(){
+		return this._destination || path.join(config.defaultDestination, this.alias);
+	}
+	set destination(value: string){
+		if (!fs.existsSync(value)){
+			fs.mkdirSync(value, {recursive: true});
+		}
+		this._destination = value;
 		this.write();
 	}
 	promises: Promise<any>[] = [];
@@ -39,20 +50,23 @@ export default class Source {
 		if (!this.uuid){
 			this.uuid = uuid();
 		}
-		if (this.type !== '_source'){
-			this.write();
-		}
+		this.write();
 	}
 	get configPath(){
 		return path.join(config.sourcesFolder, this.alias+'.json');
 	}
 	write(){
+		if (this.type === '_source'){
+			log.debug('Refuse to write _source');
+			return;
+		}
 		fs.mkdirSync(path.dirname(this.configPath), {recursive: true});
 		fs.writeFileSync(this.configPath, JSON.stringify(this, null, 2), {encoding: 'utf8'});
 	}
 	read(){
 		if (fs.existsSync(this.configPath)){
 			Object.entries(JSON.parse(fs.readFileSync(this.configPath, {encoding: 'utf8'}))).forEach(([key, value]) => {
+				log.debug(`JSON ${key}: ${value}`);
 				try {
 					this[key] = value;
 				} catch (error){
@@ -63,19 +77,29 @@ export default class Source {
 			throw Error('Unknown source: '+this.alias);
 		}
 	}
-	map(){
+	map(onUpdate: any): Promise<any> {
 		return new Promise((resolve, reject) => {
         	reject(`Not yet implemented: ${this.type}.map()`);
 		});
 	}
-	resolve(){
+	resolve(onUpdate: any): Promise<any> {
 		return new Promise((resolve, reject) => {
         	reject(`Not yet implemented: ${this.type}.resolve()`);
 		});
 	}
-	pull(){
-		return new Promise((resolve, reject) => {
-        	reject(`Not yet implemented: ${this.type}.pull()`);
+	pull(onUpdate: any): Promise<any> {
+		return new Promise(async (resolve, reject) => {
+			try {
+				await this.map(onUpdate).catch(reason => reject(reason));
+				await this.resolve(onUpdate).catch(reason => reject(reason));
+			} catch (reason) {
+				reject(reason);
+			}
 		});
+		// return new Promise((resolve, reject) => {
+		// 	return this.map();
+		// }).then(() => {
+		// 	return this.resolve();
+		// });
 	}
 }

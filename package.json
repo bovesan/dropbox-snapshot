@@ -4,7 +4,7 @@
   "description": "Downloads and creates local snapshots of a user's Dropbox account.",
   "main": "dist/app.js",
   "scripts": {
-    "start": "rm -fr dist/* && tsc && node dist/cli.js"
+    "start": "rm -fr dist/* && tsc && node -r source-map-support/register dist/cli.js"
   },
   "repository": "https://github.com/bovesan/dropbox-snapshot.git",
   "author": "Bengt Ove Sannes",
@@ -29,6 +29,7 @@
     "@types/node": "^12.7.8",
     "@types/prompts": "^2.0.1",
     "@types/uuid": "^3.4.5",
+    "source-map-support": "^0.5.13",
     "tslint": "^5.20.0",
     "typescript": "^3.6.3"
   }

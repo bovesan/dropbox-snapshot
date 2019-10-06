@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import uuid from 'uuid/v1';
 import Stats from '../../Stats';
+import Job from './Job';
 
 interface Setting {
 	before?: ()=>Promise<any>,
@@ -14,6 +15,7 @@ interface Setting {
 	messages?: string[],
 	after?: ()=>Promise<any>,
 }
+
 export default class Source {
 	type = '_source';
 	uuid: string;
@@ -58,7 +60,6 @@ export default class Source {
 	}
 	write(){
 		if (this.type === '_source'){
-			log.debug('Refuse to write _source');
 			return;
 		}
 		fs.mkdirSync(path.dirname(this.configPath), {recursive: true});
@@ -67,7 +68,6 @@ export default class Source {
 	read(){
 		if (fs.existsSync(this.configPath)){
 			Object.entries(JSON.parse(fs.readFileSync(this.configPath, {encoding: 'utf8'}))).forEach(([key, value]) => {
-				log.debug(`JSON ${key}: ${value}`);
 				try {
 					this[key] = value;
 				} catch (error){
@@ -77,6 +77,34 @@ export default class Source {
 		} else {
 			throw Error('Unknown source: '+this.alias);
 		}
+	}
+	_job: Job;
+	get job(){
+		if (!this._job){
+			this._job = new Job(this.destination);
+			fs.readdirSync(this.destination).forEach(foldername => {
+				const jobPath = path.join(this.destination, foldername, 'snapshot.json')
+				if (fs.existsSync(jobPath)){
+			        Object.entries(JSON.parse(fs.readFileSync(jobPath, {encoding: 'utf8'}))).forEach(([key, value]) => {
+			            switch (key) {
+			                // case 'mapComplete':
+			                //     break;
+			                
+			                default:
+			                    this.job[key] = value;
+			                    break;
+			            }
+			        });
+				}
+			});
+		}
+		return this._job;
+	}
+	set job(value: Job){
+		this._job = value;
+	}
+	newJob(){
+		return this.job = new Job(this.destination);
 	}
 	map(onUpdate: (stats: Stats[]) =>void): Promise<any> {
 		return new Promise((resolve, reject) => {

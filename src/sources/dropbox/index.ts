@@ -1,4 +1,5 @@
 import Source from '../_source';
+import Job from '../_source/Job';
 import Dropbox from 'dropbox';
 import fetch from 'isomorphic-fetch';
 import log from '../../log';
@@ -8,17 +9,22 @@ import config from '../../config'
 import prettyBytes from 'pretty-bytes';
 import fs from 'fs';
 import path from 'path';
-import { writeArray } from '../../arrayio';
+// import { writeArray } from '../../arrayio';
 import Stats from '../../Stats';
 
 const CLIENT_ID = 'irvv6l188sxowqo';
-
 const BUFFER_SIZE = 10 * 1024 * 1024;
+
+class DropboxJob extends Job {
+	mapBuffer: (Dropbox.files.FileMetadataReference | Dropbox.files.FolderMetadataReference | Dropbox.files.DeletedMetadataReference)[] = [];
+}
 
 export default class DropboxSource extends Source {
     dropbox: DropboxTypes.Dropbox;
 	type = 'dropbox';
 	user?: Dropbox.users.FullAccount;
+	job: DropboxJob;
+	_job: DropboxJob;
 	get settings() {
 		return [
 			{
@@ -84,7 +90,6 @@ export default class DropboxSource extends Source {
 	constructor(alias?: string){
 		super(alias);
         this.dropbox = new Dropbox.Dropbox({ clientId: CLIENT_ID, fetch });
-        log.debug({token: this.token});
         if (this.token){
 			this.dropbox.setAccessToken(this.token);
         }
@@ -105,49 +110,27 @@ export default class DropboxSource extends Source {
 		return filtered;
 	}
 	map(onUpdate: (stats: Stats[]) =>void){
+		const job = this.job = new DropboxJob(this.destination);
 		return new Promise(async (resolve, reject) => {
-			const job: {
-				cursor?: string,
-				startTime?: number,
-				timestamp?: string,
-				path?: string,
-				bytesTotal: number,
-				bytesMapped: number,
-				mapLength: number,
-				mapComplete: boolean,
-    			map: (Dropbox.files.FileMetadataReference | Dropbox.files.FolderMetadataReference | Dropbox.files.DeletedMetadataReference)[];
-    			mapPath?: string,
-			} = {
-				bytesTotal: 0,
-				bytesMapped: 0,
-				mapLength: 0,
-				mapComplete: false,
-				map: [],
-			};
-			const status: any = {};
-            const stats = new Stats('Mapping remote', true);
-            stats.onUpdate = (value) => {
-                // status.progress = value / job.bytesTotal;
-                // // log.debug(JSON.stringify({value, jobBytesTotal: job.bytesTotal, progress}));
-                // status.status = (status.progress * 100).toPrecision(3) + '%';
-                // status.status += ' @ ' + prettyBytes(Math.floor(stats.lastMinute / 60)) + 'ps ETL: ' + stats.etl(status.progress);
-                onUpdate([stats]);
-            }
-	        job.startTime = Date.now();
-	        job.timestamp = new Date(job.startTime).toISOString().replace('T', ' ').slice(0, 16).replace(':', '-');
 	        try {
 	        	job.bytesTotal = await this.dropbox.usersGetSpaceUsage().then(data => data.used);
 	        } catch ({error}) {
 	        	log.error(error);
 	        	return reject(error);
 	        }
+        	job.write();
+			const status: any = {};
+            const stats = new Stats('Mapping remote', true);
+            stats.onUpdate = (value) => {
+                onUpdate([stats]);
+            }
             stats.target = job.bytesTotal;
-        	job.path = path.join(this.destination, job.timestamp + '.job');
-        	job.mapPath = path.join(this.destination, job.timestamp + '.map');
+            onUpdate([stats]);
         	let entrySize = 0;
             let listFolderResult: Dropbox.files.ListFolderResult | undefined;
             log.info(`Mapping remote (${prettyBytes(job.bytesTotal)})`)
-        	fs.writeFileSync(job.mapPath, '[\n');
+        	// fs.writeFileSync(job.mapPath, '[\n');
+        	let index = 0;
             while (!listFolderResult || listFolderResult.has_more) {
                 try {
                     if (job.cursor) {
@@ -166,34 +149,39 @@ export default class DropboxSource extends Source {
                             job.bytesMapped += (entry as Dropbox.files.FileMetadataReference).size;
                         }
                     });
-                    job.map.push(...listFolderResult.entries);
+                    log.debug(`Received ${listFolderResult.entries.length} entries`)
+                    job.mapBuffer.push(...listFolderResult.entries);
+                    index += listFolderResult.entries.length;
                     if (!entrySize){
-                    	entrySize = (JSON.stringify(job.map.find(entry => entry['.tag'] == 'file')) || {length:0}).length;
+                    	// Use this as an estimate to avoid unnecessary JSON conversion
+                    	entrySize = JSON.stringify(job.mapBuffer).length / job.mapBuffer.length;
+                    	log.debug(`Average entry size: ${prettyBytes(entrySize)}`)
                     }
-                    if (job.map.length * entrySize > BUFFER_SIZE){
-                    	log.debug('Buffer > '+prettyBytes(BUFFER_SIZE)+' saving to disk: '+job.mapPath);
-                    	fs.appendFileSync(job.mapPath, job.map.map(item => JSON.stringify(item)).join(',')+'\n');
-                    	job.map.length = 1;
+                    if (job.mapBuffer.length * entrySize > BUFFER_SIZE){
+                    	job.dumpMapBuffer(index);
+                    	job.write();
                     }
                     stats.log(job.bytesMapped);
                 	// onUpdate('Mapping remote', 'progress', job.bytesMapped / job.bytesTotal);
                 } catch (error) {
                     reject(error);
                 }
-                job.mapLength = job.map.length;
+                job.mapItems = index;
             }
-        	fs.writeFileSync(job.mapPath, ']');
             // process.stdout.write('\rMapping remote'.padEnd(21) + '100%'.padEnd(50));
             // log('');
+        	job.dumpMapBuffer(index);
             job.mapComplete = true;
-            fs.writeFileSync(job.path, JSON.stringify(job, null, 2));
-            log.info(`Writing map to disk ...`)
+            job.write();
             // await job.writeMap().catch(error => reject(error));
-
-            writeArray(job.mapPath, job.map);
-
-            log.info('Wrote map: ' + job.mapPath);
+            // writeArray(job.mapPath, job.map);
             resolve();
+		});
+	}
+	resolve(onUpdate: (stats: Stats[]) =>void){
+		const job = this.job;
+		return new Promise(async (resolve, reject) => {
+			resolve();
 		});
 	}
 }

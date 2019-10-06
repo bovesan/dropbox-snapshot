@@ -90,7 +90,7 @@ export default class Stats {
 				this.seconds.length = 61;
 			}
 		}
-		if (now.time > this.minutes[0].time + 1000) {
+		if (now.time > this.minutes[0].time + 1000 * 60) {
 			this.minutes.unshift(now);
 			if (this.minutes.length > 61) {
 				this.minutes.length = 61;

@@ -63,4 +63,19 @@ export default class Source {
 			throw Error('Unknown source: '+this.alias);
 		}
 	}
+	map(){
+		return new Promise((resolve, reject) => {
+        	reject(`Not yet implemented: ${this.type}.map()`);
+		});
+	}
+	resolve(){
+		return new Promise((resolve, reject) => {
+        	reject(`Not yet implemented: ${this.type}.resolve()`);
+		});
+	}
+	pull(){
+		return new Promise((resolve, reject) => {
+        	reject(`Not yet implemented: ${this.type}.pull()`);
+		});
+	}
 }

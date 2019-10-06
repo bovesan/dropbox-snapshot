@@ -69,12 +69,26 @@ export default class DropboxSource extends Source {
 		this._remoteFolder = value;
 		this.write();
 	}
-	constructor(){
+	constructor(alias?: string){
 		super();
         this.dropbox = new Dropbox.Dropbox({ clientId: CLIENT_ID, fetch });
         if (this.token){
 			this.dropbox.setAccessToken(this.token);
         }
 		// throw Error('Not yet implemented');
+	}
+	toJSON(){
+		const filtered = {};
+		Object.entries(this).forEach(([key, value]) => {
+			switch (key) {
+				case 'dropbox':
+				case 'user':
+					return;
+				
+				default:
+					filtered[key] = value;
+			}
+		});
+		return filtered;
 	}
 }

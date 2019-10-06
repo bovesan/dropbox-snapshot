@@ -7,6 +7,7 @@ import log from './log';
 import { etl } from './stats';
 import Sources from './sources';
 import prompts from 'prompts';
+import colors from 'colors';
 
 function runPromiseAndExit(promise: Promise<any>) {
     let keepAlive = setInterval(() => {
@@ -21,10 +22,19 @@ function runPromiseAndExit(promise: Promise<any>) {
         clearInterval(keepAlive);
     });
 }
-async function asyncForEach(array: [], callback: (T) => void) {
-  for (let index = 0; index < array.length; index++) {
-    await callback(array[index]);
-  }
+function sourceIds(sourceId: string | number){
+    let sourceIds: (string | number)[] = [];
+    if (sourceId){
+        try {
+            sourceId = Number(sourceId);
+        } catch {
+            //
+        }
+        sourceIds.push(sourceId);
+    } else {
+        sourceIds = Sources.entries().map(entry => entry.alias);
+    }
+    return sourceIds;
 }
 function monitor(status: Status){
     const line = '  ' + Object.entries(status).map(([key, value]) => {
@@ -51,7 +61,7 @@ program
 
 program
     .command('config [key] [value]')
-    .description('Global configuration.')
+    .description('global configuration')
     .action(async function(key, value) {
         if (key){
             if (value !== undefined){
@@ -69,7 +79,7 @@ program
 
 program
     .command('add')
-    .description('Add a source.')
+    .description('add a source')
     .action(async (command: commander.Command) => {
         const source = await prompts([
             {
@@ -87,7 +97,7 @@ program
               initial: 0,
             },
         ]).then(({service}) => {
-            return Sources(service);
+            return Sources.new(service);
         });
         for (var i = 0; i < source.settings.length; ++i) {
             const setting = source.settings[i];
@@ -137,33 +147,54 @@ program
 
 program
     .command('list')
-    .description('List all configured sources.')
+    .description('list all configured sources')
     .action(async function(key, newValue) {
-        throw Error('Not yet implemented');
+        Sources.entries().forEach(entry => {
+            console.log(`[${entry.index}]`.padStart(5)+` ${entry.alias} (${entry.type})`);
+        });
     });
 
 program
     .command('map [source]')
-    .description('Create an updated index.')
-    .action(async function(key, newValue) {
-        throw Error('Not yet implemented');
+    .description('create an updated index')
+    .action(async function(sourceId?: string | number) {
+        sourceIds(sourceId).forEach(sourceId => {
+            return Sources.load(sourceId).map().catch(error => {
+                console.log(colors.red(error));
+            });
+        });
     });
 
 program
     .command('resolve [source]')
-    .description('Update files according to the latest map and download resources as necessary.')
-    .action(async function(key, newValue) {
-        throw Error('Not yet implemented');
+    .description('update files according to the latest map and download resources as necessary')
+    .action(async function(sourceId?: string | number) {
+        sourceIds(sourceId).forEach(sourceId => {
+            return Sources.load(sourceId).resolve().catch(error => {
+                console.log(colors.red(error));
+            });
+        });
     });
 
 program
     .command('pull [source]')
-    .description('Map and resolve.')
-    .action(async function(key, newValue) {
-        throw Error('Not yet implemented');
+    .description('map and resolve')
+    .action(async function(sourceId?: string | number) {
+        sourceIds(sourceId).forEach(sourceId => {
+            return Sources.load(sourceId).pull().catch(error => {
+                console.log(colors.red(error));
+            });
+        });
+    });
+
+program
+    .command('*')
+    .action(async function(commandName) {
+        console.log(colors.red('Unknown command: '+commandName));
+        program.outputHelp();
     });
 
 program.parse(process.argv);
-if (process.argv.length < 3) {
+if (process.argv.length < 3){
     program.outputHelp();
 }

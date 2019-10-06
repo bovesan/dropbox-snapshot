@@ -12,6 +12,7 @@
   "private": false,
   "dependencies": {
     "bfj": "^7.0.1",
+    "colors": "^1.4.0",
     "commander": "^3.0.2",
     "debug": "^4.1.1",
     "diskusage": "^1.1.3",
